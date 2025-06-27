@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试候选人设置功能</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .candidate {
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .current {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        button {
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .log {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>候选人设置功能测试</h1>
+    
+    <div id="candidates"></div>
+    
+    <div class="log">
+        <h3>日志输出：</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let candidates = [];
+        let currentCandidate = null;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        async function loadCandidates() {
+            try {
+                log('正在加载候选人数据...');
+                const response = await fetch('/api/score');
+                const data = await response.json();
+                candidates = data.candidates;
+                currentCandidate = data.currentCandidate;
+                log(`加载了 ${candidates.length} 个候选人，当前候选人：${currentCandidate?.name || '无'}`);
+                renderCandidates();
+            } catch (error) {
+                log(`加载候选人失败：${error.message}`);
+            }
+        }
+        
+        async function setCurrentCandidate(candidateId) {
+            try {
+                log(`正在设置当前候选人：${candidateId}`);
+                const response = await fetch('/api/admin/set-candidate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ candidateId })
+                });
+                
+                const result = await response.json();
+                log(`设置结果：${JSON.stringify(result)}`);
+                
+                if (result.success) {
+                    // 重新加载数据验证
+                    await loadCandidates();
+                } else {
+                    log(`设置失败：${result.error}`);
+                }
+            } catch (error) {
+                log(`设置候选人失败：${error.message}`);
+            }
+        }
+        
+        function renderCandidates() {
+            const container = document.getElementById('candidates');
+            container.innerHTML = '';
+            
+            candidates.forEach(candidate => {
+                const div = document.createElement('div');
+                div.className = `candidate ${candidate.id === currentCandidate?.id ? 'current' : ''}`;
+                
+                div.innerHTML = `
+                    <h3>${candidate.name} (${candidate.number})</h3>
+                    <p>部门：${candidate.department}</p>
+                    <p>状态：${candidate.status}</p>
+                    <p>总分：${candidate.totalScore}</p>
+                    <button 
+                        onclick="setCurrentCandidate('${candidate.id}')"
+                        ${candidate.id === currentCandidate?.id ? 'disabled' : ''}
+                    >
+                        ${candidate.id === currentCandidate?.id ? '当前' : '设为当前'}
+                    </button>
+                `;
+                
+                container.appendChild(div);
+            });
+        }
+        
+        // 页面加载时初始化
+        window.onload = () => {
+            log('页面加载完成，开始测试...');
+            loadCandidates();
+        };
+    </script>
+</body>
+</html>
