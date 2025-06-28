@@ -14,12 +14,19 @@
 
 ### 🔧 主要任务
 
-#### 1.1 创建基础文件结构（30分钟）
+#### 1.1 安装依赖和创建文件结构（45分钟）
+
+**安装WebSocket依赖：**
 ```bash
-# 创建目录结构
+npm install ws uuid
+npm install --save-dev @types/ws @types/uuid
+```
+
+**创建目录结构：**
+```bash
+# 创建新目录（hooks目录已存在）
 mkdir -p lib/websocket
 mkdir -p app/api/websocket
-mkdir -p hooks
 ```
 
 **文件清单：**
@@ -27,7 +34,10 @@ mkdir -p hooks
 - [ ] `lib/websocket/server.ts` - WebSocket服务器
 - [ ] `lib/websocket/client.ts` - WebSocket客户端
 - [ ] `lib/websocket/events.ts` - 事件定义
+- [ ] `lib/websocket/manager.ts` - WebSocket管理器
 - [ ] `app/api/websocket/route.ts` - API路由
+- [ ] `hooks/useWebSocket.ts` - WebSocket Hook
+- [ ] `types/websocket.ts` - WebSocket专用类型
 
 #### 1.2 实现WebSocket服务器（2小时）
 **核心功能：**
@@ -43,12 +53,21 @@ mkdir -p hooks
 - [ ] 消息发送队列
 - [ ] 连接状态管理
 
-#### 1.4 Next.js集成（1小时）
+#### 1.4 Next.js集成和配置（1小时）
 **集成任务：**
+- [ ] 更新 `next.config.mjs` 添加WebSocket支持
 - [ ] 配置WebSocket服务器启动
 - [ ] 创建API路由处理
 - [ ] 添加开发环境配置
 - [ ] 创建测试页面
+
+**配置更新：**
+```javascript
+// next.config.mjs 添加
+experimental: {
+  serverComponentsExternalPackages: ['ws'],
+},
+```
 
 #### 1.5 基础功能测试（2.5小时）
 **测试项目：**
@@ -89,18 +108,45 @@ mkdir -p hooks
 
 #### 2.2 状态管理集成（2小时）
 **集成任务：**
-- [ ] 修改 `scoring-store-enhanced.ts`
-- [ ] 替换SSE事件发送为WebSocket
+- [ ] 修改 `lib/scoring-store-enhanced.ts`
+  - 替换 `emitEvent()` 方法为WebSocket广播
+  - 保留现有事件类型和数据结构
+  - 集成WebSocket连接管理
+- [ ] 扩展 `types/scoring.ts`
+  - 添加WebSocket事件类型
+  - 保持现有 `ScoringEvent` 兼容性
 - [ ] 实现状态同步机制
 - [ ] 添加状态恢复逻辑
 
+**关键修改点：**
+```typescript
+// scoring-store-enhanced.ts 中的关键修改
+// 替换: this.emitEvent(eventType, eventData)
+// 为: this.webSocketManager.broadcast(eventType, eventData)
+```
+
 #### 2.3 前端页面适配（3小时）
 **页面修改：**
-- [ ] 创建 `useWebSocket` React Hook
-- [ ] 管理页面WebSocket集成
-- [ ] 大屏显示页面WebSocket集成
-- [ ] 评分页面WebSocket集成
-- [ ] 移除SSE相关代码
+- [ ] 创建 `hooks/useWebSocket.ts` React Hook
+- [ ] 修改 `app/admin/page.tsx` - 管理页面
+  - 替换 `EventSource` 为 `useWebSocket`
+  - 保持现有事件处理逻辑
+  - 添加连接状态显示
+- [ ] 修改 `app/display/page.tsx` - 大屏显示页面
+  - 替换SSE连接为WebSocket
+  - 保持现有事件监听逻辑
+  - 优化重连处理
+- [ ] 修改 `app/score/page.tsx` - 评分页面
+  - 集成WebSocket连接
+  - 保持评分同步功能
+- [ ] 移除SSE相关代码（保留作为备份）
+
+**关键修改模式：**
+```typescript
+// 替换模式
+// 旧: const eventSource = new EventSource('/api/events')
+// 新: const { subscribe, isConnected } = useWebSocket()
+```
 
 #### 2.4 功能验证测试（1小时）
 **测试项目：**

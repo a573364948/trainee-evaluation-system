@@ -68,15 +68,61 @@ lib/
 │   ├── server.ts           # WebSocket服务器
 │   ├── client.ts           # WebSocket客户端
 │   ├── types.ts            # WebSocket类型定义
-│   └── events.ts           # 事件定义
+│   ├── events.ts           # 事件定义
+│   └── manager.ts          # WebSocket管理器（替代scoring-store-enhanced.ts中的SSE部分）
 │
 app/api/
 ├── websocket/
 │   └── route.ts            # WebSocket API路由
 │
+hooks/                      # 现有目录，需要添加
+├── useWebSocket.ts         # WebSocket React Hook
+└── useConnectionStatus.ts  # 连接状态Hook
+│
 components/
 ├── websocket-provider.tsx  # WebSocket上下文提供者
-└── connection-status.tsx   # 连接状态组件
+├── connection-status.tsx   # 连接状态组件
+└── websocket-debug.tsx     # 开发调试组件
+│
+types/
+├── scoring.ts              # 现有文件，需要扩展WebSocket事件类型
+└── websocket.ts            # 新增WebSocket专用类型
+```
+
+## 🔧 依赖管理
+
+### 需要添加的依赖
+```json
+{
+  "dependencies": {
+    "ws": "^8.14.2",              // WebSocket服务器
+    "uuid": "^9.0.1"              // 客户端ID生成
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.8",        // WebSocket类型定义
+    "@types/uuid": "^9.0.7"       // UUID类型定义
+  }
+}
+```
+
+### Next.js配置更新
+```javascript
+// next.config.mjs 需要添加WebSocket支持
+const nextConfig = {
+  // ... 现有配置
+  experimental: {
+    serverComponentsExternalPackages: ['ws'],  // 允许在服务器组件中使用ws
+  },
+  // 开发环境WebSocket配置
+  async rewrites() {
+    return [
+      {
+        source: '/api/websocket',
+        destination: '/api/websocket',
+      },
+    ]
+  },
+}
 ```
 
 ## 🔧 技术实现细节
@@ -93,20 +139,34 @@ interface WebSocketMessage {
 }
 ```
 
-### 2. 事件类型定义
+### 2. 事件类型定义（基于现有SSE事件）
 ```typescript
 type WebSocketEvents = {
   // 系统事件
   'connection': { clientId: string, type: 'admin' | 'display' | 'judge' }
   'disconnection': { clientId: string }
   'heartbeat': { timestamp: number }
-  
-  // 业务事件（保持与现有SSE事件兼容）
-  'stage_changed': { stage: string, data: any }
-  'question_changed': { question: any }
+
+  // 业务事件（完全兼容现有SSE事件）
+  'score_updated': { candidate: any, score: any }
+  'candidate_changed': { candidate: any }
+  'round_changed': { round: any }
+  'judge_changed': { judge: any }
+  'dimension_changed': { dimension: any }
+  'score_item_changed': { scoreItem: any }
+  'batch_changed': { batch: any }
+  'batch_loaded': { batch: any }
+  'stage_changed': { stage: string, displaySession: any }
+  'question_changed': { question: any, displaySession: any }
   'interview_item_changed': { item: any }
+  'interview_items_changed': { items: any[] }
+  'interview_item_added': { item: any }
+  'interview_item_updated': { item: any }
+  'interview_item_deleted': { id: string, item: any }
   'timer_changed': { timerState: any }
-  'scores_updated': { scores: any }
+  'connection_changed': { connected: boolean, connectionId: string, type: string }
+  'data_restored': { backupFileName: string }
+  'data_imported': { filePath: string }
 }
 ```
 
@@ -121,7 +181,67 @@ type WebSocketEvents = {
 - **增量更新：** 状态变化时只发送变更部分
 - **状态恢复：** 重连后自动同步最新状态
 
-## 🚀 实施计划
+## � 现有代码集成分析
+
+### 需要修改的现有文件
+
+#### 1. lib/scoring-store-enhanced.ts
+**当前状态：** 包含完整的SSE事件发送逻辑
+**需要修改：**
+- 替换 `emitEvent()` 方法为WebSocket广播
+- 保留现有的事件类型和数据结构
+- 添加WebSocket连接管理
+
+#### 2. app/api/events/route.ts
+**当前状态：** SSE事件流处理
+**处理方案：**
+- 保留文件作为备用方案
+- 新建 `app/api/websocket/route.ts` 处理WebSocket连接
+
+#### 3. 前端页面SSE集成
+**需要修改的页面：**
+- `app/admin/page.tsx` - 管理页面
+- `app/display/page.tsx` - 大屏显示页面
+- `app/score/page.tsx` - 评分页面
+
+**修改内容：**
+- 替换 `EventSource` 为 `WebSocket`
+- 保持现有的事件处理逻辑不变
+- 添加连接状态显示
+
+#### 4. types/scoring.ts
+**当前状态：** 包含 `ScoringEvent` 类型定义
+**需要扩展：**
+- 添加WebSocket特有的事件类型
+- 保持现有事件类型兼容性
+
+### 兼容性保证策略
+
+#### 事件名称映射
+```typescript
+// 保持100%兼容现有事件
+const SSE_TO_WEBSOCKET_EVENTS = {
+  'score_updated': 'score_updated',
+  'candidate_changed': 'candidate_changed',
+  'stage_changed': 'stage_changed',
+  'question_changed': 'question_changed',
+  'interview_item_changed': 'interview_item_changed',
+  'timer_changed': 'timer_changed',
+  // ... 其他事件保持一致
+}
+```
+
+#### 数据格式兼容
+```typescript
+// 保持现有数据格式不变
+interface WebSocketEventData {
+  type: ScoringEvent['type']  // 复用现有类型
+  data: any                   // 保持现有数据结构
+  timestamp: number           // 保持现有时间戳
+}
+```
+
+## �🚀 实施计划
 
 ### 第一步：基础WebSocket服务搭建（预计1天）
 
