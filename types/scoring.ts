@@ -74,6 +74,16 @@ export interface Batch {
   }
 }
 
+// 倒计时状态
+export interface TimerState {
+  isRunning: boolean      // 是否正在运行
+  isPaused: boolean       // 是否暂停
+  remainingTime: number   // 剩余时间（毫秒）
+  totalTime: number       // 总时间（毫秒）
+  startTime?: number      // 开始时间戳
+  pausedTime?: number     // 暂停时间戳
+}
+
 export interface DisplaySession {
   id: string
   currentStage: "opening" | "questioning" | "scoring"
@@ -84,6 +94,18 @@ export interface DisplaySession {
     timeLimit: number // 秒
     startTime: number
   }
+  // 新增：当前面试项目（替代currentQuestion）
+  currentInterviewItem?: {
+    id: string
+    type: 'question' | 'interview_stage'
+    title: string
+    subtitle?: string
+    content?: string
+    timeLimit: number | null
+    startTime: number
+  }
+  // 新增：倒计时状态
+  timerState?: TimerState
   settings: {
     showTimer: boolean
     showProgress: boolean
@@ -125,6 +147,7 @@ export interface ScoringEvent {
     | "batch_changed"
     | "stage_changed"
     | "question_changed"
+    | "interview_item_changed"  // 新增事件类型
   data: any
   timestamp: number
 }

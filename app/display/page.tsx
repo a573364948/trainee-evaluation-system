@@ -6,6 +6,10 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Search, User, Clock, Play, MessageSquare, Award, ArrowRight, RotateCcw } from "lucide-react"
 import type { Candidate, Judge, InterviewDimension, ScoreItem, DisplaySession, Question } from "@/types/scoring"
+import { LayoutCentered } from "@/components/interview-stage-layouts/layout-centered"
+import { LayoutMinimal } from "@/components/interview-stage-layouts/layout-minimal"
+import { LayoutTransition } from "@/components/layout-transition"
+import { TimerWarningOverlay } from "@/components/timer-warning-overlay"
 
 export default function DisplayPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
@@ -21,6 +25,11 @@ export default function DisplayPage() {
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [transitionText, setTransitionText] = useState("")
   const [previousStage, setPreviousStage] = useState<string | null>(null) // 添加强制更新状态
+
+  // 新增：布局切换过渡状态
+  const [isLayoutTransitioning, setIsLayoutTransitioning] = useState(false)
+  const [layoutTransitionType, setLayoutTransitionType] = useState<'to_interview_stage' | 'to_question' | 'stage_change'>('to_interview_stage')
+  const [previousItem, setPreviousItem] = useState<any>(null)
 
   useEffect(() => {
     // 更新时间
@@ -48,6 +57,8 @@ export default function DisplayPage() {
     // 监听实时更新 - 改进的 SSE 连接
     let eventSource: EventSource | null = null
     let reconnectTimer: NodeJS.Timeout | null = null
+    let connectionCheckTimer: NodeJS.Timeout | null = null
+    let lastHeartbeat = Date.now()
 
     const connectSSE = () => {
       if (eventSource) {
@@ -66,7 +77,9 @@ export default function DisplayPage() {
         console.log("[Display] Received event:", data.type, data)
 
         if (data.type === "heartbeat") {
-          // 忽略心跳包
+          // 更新心跳时间
+          lastHeartbeat = Date.now()
+          console.log("[Display] Heartbeat received")
           return
         }
 
@@ -136,6 +149,97 @@ export default function DisplayPage() {
           console.log("[Display] Question changed:", data.data)
           setDisplaySession((prev) => (prev ? { ...prev, currentQuestion: data.data } : null))
           setForceUpdate((prev) => prev + 1) // 强制重新渲染
+        } else if (data.type === "interview_item_changed") {
+          console.log("[Display] Interview item changed:", data.data)
+
+          // 检查是否需要布局切换过渡
+          const newItem = data.data.item
+          const currentItem = displaySession?.currentInterviewItem || displaySession?.currentQuestion
+
+          if (currentItem && newItem) {
+            const currentType = currentItem.type || 'question'
+            const newType = newItem.type
+
+            // 如果类型发生变化，触发过渡动画
+            if (currentType !== newType) {
+              setPreviousItem(currentItem)
+              setLayoutTransitionType(newType === 'interview_stage' ? 'to_interview_stage' : 'to_question')
+              setIsLayoutTransitioning(true)
+
+              // 延迟更新显示会话，让过渡动画完成
+              setTimeout(() => {
+                setDisplaySession((prev) => {
+                  if (!prev) return null
+
+                  const updated = { ...prev, currentInterviewItem: newItem }
+
+                  // 如果是题目类型，也更新currentQuestion以保持兼容性
+                  if (newItem.type === 'question') {
+                    updated.currentQuestion = {
+                      id: newItem.id,
+                      title: newItem.title,
+                      content: newItem.content || '',
+                      timeLimit: newItem.timeLimit || 300,
+                      startTime: newItem.startTime
+                    }
+                  }
+
+                  return updated
+                })
+                setForceUpdate((prev) => prev + 1)
+              }, 1200) // 与过渡动画时间匹配
+            } else {
+              // 同类型切换，直接更新
+              setDisplaySession((prev) => {
+                if (!prev) return null
+
+                const updated = { ...prev, currentInterviewItem: newItem }
+
+                // 如果是题目类型，也更新currentQuestion以保持兼容性
+                if (newItem.type === 'question') {
+                  updated.currentQuestion = {
+                    id: newItem.id,
+                    title: newItem.title,
+                    content: newItem.content || '',
+                    timeLimit: newItem.timeLimit || 300,
+                    startTime: newItem.startTime
+                  }
+                }
+
+                return updated
+              })
+              setForceUpdate((prev) => prev + 1)
+            }
+          } else {
+            // 首次设置或无当前项目，直接更新
+            setDisplaySession((prev) => {
+              if (!prev) return null
+
+              const updated = { ...prev, currentInterviewItem: newItem }
+
+              // 如果是题目类型，也更新currentQuestion以保持兼容性
+              if (newItem.type === 'question') {
+                updated.currentQuestion = {
+                  id: newItem.id,
+                  title: newItem.title,
+                  content: newItem.content || '',
+                  timeLimit: newItem.timeLimit || 300,
+                  startTime: newItem.startTime
+                }
+              }
+
+              return updated
+            })
+            setForceUpdate((prev) => prev + 1)
+          }
+        } else if (data.type === "timer_changed") {
+          console.log("[Display] Timer state changed:", data.data)
+          setDisplaySession((prev) => {
+            if (!prev) return null
+            return { ...prev, timerState: data.data.timerState }
+          })
+          setForceUpdate((prev) => prev + 1)
+          return
         }
       }
 
@@ -149,37 +253,72 @@ export default function DisplayPage() {
             console.log("[Display] Attempting to reconnect SSE...")
             reconnectTimer = null
             connectSSE()
-          }, 3000)
+          }, 1000) // 缩短重连间隔到1秒
         }
+      }
+    }
+
+    // 连接状态检查机制
+    const checkConnection = () => {
+      const now = Date.now()
+      const timeSinceLastHeartbeat = now - lastHeartbeat
+
+      // 如果超过20秒没有收到心跳，主动重连
+      if (timeSinceLastHeartbeat > 20000) {
+        console.log(`[Display] No heartbeat for ${timeSinceLastHeartbeat}ms, reconnecting...`)
+        connectSSE()
       }
     }
 
     // 初始连接
     connectSSE()
 
+    // 每15秒检查一次连接状态
+    connectionCheckTimer = setInterval(checkConnection, 15000)
+
     return () => {
       clearInterval(timer)
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
       }
+      if (connectionCheckTimer) {
+        clearInterval(connectionCheckTimer)
+      }
       if (eventSource) {
         eventSource.close()
       }
     }
-  }, [currentCandidate?.id, forceUpdate])
+  }, []) // 移除依赖，避免因状态更新导致SSE连接重建
 
-  // 计算答题剩余时间
+  // 计算答题剩余时间 - 支持手动倒计时控制
   useEffect(() => {
-    if (displaySession?.currentQuestion && displaySession.currentStage === "questioning") {
+    const currentItem = displaySession?.currentInterviewItem || displaySession?.currentQuestion
+    const timerState = displaySession?.timerState
+
+    if (currentItem && displaySession?.currentStage === "questioning") {
       const interval = setInterval(() => {
-        const elapsed = Date.now() - displaySession.currentQuestion!.startTime
-        const remaining = Math.max(0, displaySession.currentQuestion!.timeLimit * 1000 - elapsed)
-        setTimeRemaining(remaining)
-      }, 1000)
+        if (timerState) {
+          // 使用手动控制的倒计时状态
+          if (timerState.isRunning && timerState.startTime) {
+            const elapsed = Date.now() - timerState.startTime
+            const remaining = Math.max(0, timerState.remainingTime - elapsed)
+            setTimeRemaining(remaining)
+          } else {
+            // 暂停或停止状态，显示当前剩余时间
+            setTimeRemaining(timerState.remainingTime)
+          }
+        } else {
+          // 回退到自动计算（向后兼容）
+          const elapsed = Date.now() - currentItem.startTime
+          const timeLimit = currentItem.timeLimit || 0
+          const remaining = Math.max(0, timeLimit * 1000 - elapsed)
+          setTimeRemaining(remaining)
+        }
+      }, 100) // 更频繁的更新以获得更平滑的显示
 
       return () => clearInterval(interval)
     }
-  }, [displaySession?.currentQuestion, displaySession?.currentStage])
+  }, [displaySession?.currentInterviewItem, displaySession?.currentQuestion, displaySession?.currentStage, displaySession?.timerState])
 
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000)
@@ -365,7 +504,27 @@ export default function DisplayPage() {
   )
 
   // 答题环节
-  const renderQuestioningStage = () => (
+  const renderQuestioningStage = () => {
+    // 优先使用新的currentInterviewItem，如果没有则回退到currentQuestion
+    const currentItem = displaySession?.currentInterviewItem
+    const currentQuestion = displaySession?.currentQuestion
+
+    // 如果是面试环节类型，使用极简布局
+    if (currentItem && currentItem.type === 'interview_stage') {
+      return (
+        <LayoutMinimal
+          currentItem={currentItem}
+          currentCandidate={currentCandidate}
+          timeRemaining={timeRemaining}
+          formatTime={formatTime}
+          judges={judges}
+        />
+      )
+    }
+
+    // 对于题目类型或使用原有currentQuestion，直接使用原有的答题布局
+    // 这里不做任何修改，保持原有的答题界面
+    return (
     <div className="min-h-screen bg-[#1a1a1a] text-white flex">
       {/* 左侧候选人信息 */}
       <div className="w-80 bg-[#2a2a2a] p-6 flex flex-col">
@@ -533,7 +692,8 @@ export default function DisplayPage() {
         </div>
       </div>
     </div>
-  )
+    )
+  }
 
   // 评分环节（原有的界面）
   const renderScoringStage = () => {
@@ -844,6 +1004,27 @@ export default function DisplayPage() {
     )
   }
 
+  // 如果正在进行布局切换过渡，显示布局过渡动画
+  if (isLayoutTransitioning) {
+    return (
+      <>
+        {/* 布局切换过渡动画 */}
+        <LayoutTransition
+          isTransitioning={isLayoutTransitioning}
+          transitionType={layoutTransitionType}
+          fromType={previousItem?.type}
+          toType={displaySession?.currentInterviewItem?.type}
+          fromTitle={previousItem?.title}
+          toTitle={displaySession?.currentInterviewItem?.title}
+          onTransitionComplete={() => {
+            setIsLayoutTransitioning(false)
+            setPreviousItem(null)
+          }}
+        />
+      </>
+    )
+  }
+
   // 如果正在过渡，显示过渡动画
   if (isTransitioning) {
     return (
@@ -882,14 +1063,26 @@ export default function DisplayPage() {
     )
   }
 
-  switch (displaySession.currentStage) {
-    case "opening":
-      return renderOpeningStage()
-    case "questioning":
-      return renderQuestioningStage()
-    case "scoring":
-      return renderScoringStage()
-    default:
-      return renderOpeningStage()
-  }
+  const mainContent = (() => {
+    switch (displaySession.currentStage) {
+      case "opening":
+        return renderOpeningStage()
+      case "questioning":
+        return renderQuestioningStage()
+      case "scoring":
+        return renderScoringStage()
+      default:
+        return renderOpeningStage()
+    }
+  })()
+
+  return (
+    <>
+      {mainContent}
+      {/* 倒计时警告覆盖层 */}
+      {displaySession.currentStage === "questioning" && (
+        <TimerWarningOverlay timeRemaining={timeRemaining} />
+      )}
+    </>
+  )
 }

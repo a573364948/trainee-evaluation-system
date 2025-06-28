@@ -37,6 +37,7 @@ import InterviewDimensions from "@/components/interview-dimensions"
 import ScoreItems from "@/components/score-items"
 import BatchManagement from "@/components/batch-management"
 import InterviewItemManager from "@/components/interview-item-manager"
+import { TimerControl } from "@/components/timer-control"
 
 export default function AdminPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
@@ -130,6 +131,9 @@ export default function AdminPage() {
         } else if (data.type === "question_changed") {
           console.log("[Admin] Question changed:", data.data)
           setDisplaySession((prev: any) => (prev ? { ...prev, currentQuestion: data.data } : null))
+        } else if (data.type === "interview_item_changed") {
+          console.log("[Admin] Interview item changed:", data.data)
+          setDisplaySession((prev: any) => (prev ? { ...prev, currentInterviewItem: data.data.item } : null))
         } else if (data.type === "interview_items_changed") {
           console.log("[Admin] Interview items changed:", data.data)
           const sortedItems = data.data.items.sort((a: any, b: any) => a.order - b.order)
@@ -317,6 +321,73 @@ export default function AdminPage() {
       }
     } catch (error) {
       console.error("切换题目失败:", error)
+      setQuestionLoading(null)
+    }
+  }
+
+  // 倒计时控制处理函数
+  const handleTimerAction = async (action: string, duration?: number) => {
+    try {
+      console.log("Timer action:", action, duration ? `duration: ${duration}` : '')
+
+      const response = await fetch("/api/admin/timer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, duration }),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        console.log("Timer action completed:", result)
+
+        // 立即更新本地状态，确保界面响应
+        if (result.timerState) {
+          setDisplaySession((prev) => {
+            if (!prev) return null
+            return { ...prev, timerState: result.timerState }
+          })
+        }
+
+        // 状态也会通过SSE事件自动更新（如果连接正常）
+      } else {
+        console.error("Timer action failed:", await response.text())
+      }
+    } catch (error) {
+      console.error("Timer action error:", error)
+    }
+  }
+
+  // 新增：处理面试项目切换（统一处理题目和面试环节）
+  const handleInterviewItemChange = async (itemId: string) => {
+    try {
+      // 设置加载状态
+      setQuestionLoading(itemId)
+      setQuestionSuccess(null)
+
+      console.log("Switching to interview item:", itemId)
+      const response = await fetch("/api/admin/display/interview-item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId }),
+      })
+
+      if (response.ok) {
+        console.log("Interview item switched successfully to:", itemId)
+
+        // 设置成功状态
+        setQuestionLoading(null)
+        setQuestionSuccess(itemId)
+
+        // 2秒后清除成功状态
+        setTimeout(() => {
+          setQuestionSuccess(null)
+        }, 2000)
+      } else {
+        console.error("Failed to switch interview item:", await response.text())
+        setQuestionLoading(null)
+      }
+    } catch (error) {
+      console.error("切换面试项目失败:", error)
       setQuestionLoading(null)
     }
   }
@@ -741,30 +812,30 @@ export default function AdminPage() {
                         })().map((item, index) => (
                             <Button
                               key={item.id}
-                              onClick={() => handleQuestionChange(item.id)}
+                              onClick={() => handleInterviewItemChange(item.id)}
                               variant="outline"
-                              disabled={questionLoading === item.id || displaySession?.currentStage !== "questioning"}
+                              disabled={questionLoading === item.id || (item.type === 'question' && displaySession?.currentStage !== "questioning")}
                               className={`min-h-[120px] h-auto flex flex-col gap-2 text-left justify-start p-4 transition-all duration-300 transform hover:scale-105 relative ${
-                                displaySession?.currentStage !== "questioning"
+                                (item.type === 'question' && displaySession?.currentStage !== "questioning")
                                   ? "bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed"
-                                  : displaySession?.currentQuestion?.id === item.id
+                                  : displaySession?.currentInterviewItem?.id === item.id
                                   ? "bg-blue-100 border-blue-300 shadow-lg ring-2 ring-blue-200"
                                   : "bg-white border-gray-200 hover:bg-gray-50"
                               } ${
-                                questionSuccess === item.id && displaySession?.currentStage === "questioning"
+                                questionSuccess === item.id
                                   ? "bg-green-100 border-green-300 shadow-xl"
                                   : ""
                               }`}
                             >
                               <div className="flex items-center gap-2 mb-2 w-full">
                                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 flex-shrink-0 ${
-                                  displaySession?.currentStage !== "questioning"
+                                  (item.type === 'question' && displaySession?.currentStage !== "questioning")
                                     ? "bg-gray-200 text-gray-400"
                                     : questionLoading === item.id
                                     ? "bg-blue-400 text-white animate-pulse"
                                     : questionSuccess === item.id
                                     ? "bg-green-500 text-white animate-bounce"
-                                    : displaySession?.currentQuestion?.id === item.id
+                                    : displaySession?.currentInterviewItem?.id === item.id
                                     ? "bg-blue-600 text-white shadow-lg"
                                     : item.type === 'interview_stage'
                                     ? "bg-purple-300 text-purple-700"
@@ -842,6 +913,16 @@ export default function AdminPage() {
                             <Edit className="w-4 h-4 mr-2" />
                             添加面试项目
                           </Button>
+                        </div>
+                      )}
+
+                      {/* 倒计时控制 */}
+                      {displaySession?.currentStage === "questioning" && (
+                        <div className="mt-6 pt-6 border-t border-gray-200">
+                          <TimerControl
+                            timerState={displaySession?.timerState}
+                            onTimerAction={handleTimerAction}
+                          />
                         </div>
                       )}
                     </div>

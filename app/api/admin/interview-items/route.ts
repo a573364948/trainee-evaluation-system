@@ -1,11 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { scoringStore } from "@/lib/scoring-store"
+import { enhancedScoringStore } from "@/lib/scoring-store-enhanced"
 import type { InterviewItem } from "@/types/scoring"
 
 // 获取所有面试项目
 export async function GET() {
   try {
-    const items = scoringStore.getInterviewItems()
+    await enhancedScoringStore.initialize()
+    const items = enhancedScoringStore.getInterviewItems()
     return NextResponse.json({ items })
   } catch (error) {
     console.error("获取面试项目失败:", error)
@@ -16,8 +17,9 @@ export async function GET() {
 // 保存面试项目
 export async function POST(request: NextRequest) {
   try {
+    await enhancedScoringStore.initialize()
     const { items } = await request.json()
-    
+
     if (!Array.isArray(items)) {
       return NextResponse.json({ error: "Invalid data format" }, { status: 400 })
     }
@@ -27,13 +29,13 @@ export async function POST(request: NextRequest) {
       if (!item.id || !item.title || !item.type) {
         return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
       }
-      
+
       if (!['question', 'interview_stage'].includes(item.type)) {
         return NextResponse.json({ error: "Invalid item type" }, { status: 400 })
       }
     }
 
-    scoringStore.setInterviewItems(items)
+    enhancedScoringStore.setInterviewItems(items)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("保存面试项目失败:", error)

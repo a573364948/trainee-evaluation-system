@@ -1,11 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { scoringStore } from "@/lib/scoring-store"
+import { enhancedScoringStore } from "@/lib/scoring-store-enhanced"
 
 export async function POST(request: NextRequest) {
   try {
+    await enhancedScoringStore.initialize()
     const { candidateId, judgeId, categories } = await request.json()
 
-    const success = scoringStore.submitScore(candidateId, judgeId, categories)
+    const success = enhancedScoringStore.submitScore(candidateId, judgeId, categories)
 
     if (success) {
       return NextResponse.json({ success: true })
@@ -18,9 +19,10 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
-  const candidates = scoringStore.getCandidates()
-  const judges = scoringStore.getJudges()
-  const currentCandidate = scoringStore.getCurrentCandidate()
+  await enhancedScoringStore.initialize()
+  const candidates = enhancedScoringStore.getCandidates()
+  const judges = enhancedScoringStore.getJudges()
+  const currentCandidate = enhancedScoringStore.getCurrentCandidate()
 
   return NextResponse.json({
     candidates,

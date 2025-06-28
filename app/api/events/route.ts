@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import { scoringStore } from "@/lib/scoring-store"
+import { enhancedScoringStore } from "@/lib/scoring-store-enhanced"
 
 // 跟踪活跃连接数
 let activeConnections = 0
@@ -10,6 +10,18 @@ export async function GET(request: NextRequest) {
 
   activeConnections++
   console.log(`[SSE] New connection ${connectionId}, total active: ${activeConnections}`)
+
+  // 在stream外部初始化
+  await enhancedScoringStore.initialize()
+
+  // 检查监听器状态，如果没有监听器可能是热重载导致的实例重置
+  const listenerCount = enhancedScoringStore.getListenerCount()
+  console.log(`[SSE] Current listener count before adding: ${listenerCount}`)
+
+  // 如果监听器数量异常少，可能需要强制重新初始化（开发环境）
+  if (listenerCount === 0 && process.env.NODE_ENV === 'development') {
+    console.log(`[SSE] No listeners detected in development mode, this is normal for new connections`)
+  }
 
   const stream = new ReadableStream({
     start(controller) {
@@ -23,18 +35,18 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      scoringStore.addEventListener(listener)
+      enhancedScoringStore.addEventListener(listener)
       console.log(`[SSE] Listener added for connection ${connectionId}`)
 
       // 发送初始数据
       const initialData = {
         type: "initial",
         data: {
-          candidates: scoringStore.getCandidates(),
-          judges: scoringStore.getJudges(),
-          currentCandidate: scoringStore.getCurrentCandidate(),
-          displaySession: scoringStore.getDisplaySession(),
-          interviewItems: scoringStore.getInterviewItems(),
+          candidates: enhancedScoringStore.getCandidates(),
+          judges: enhancedScoringStore.getJudges(),
+          currentCandidate: enhancedScoringStore.getCurrentCandidate(),
+          displaySession: enhancedScoringStore.getDisplaySession(),
+          interviewItems: enhancedScoringStore.getInterviewItems(),
         },
         timestamp: Date.now(),
       }
@@ -56,13 +68,13 @@ export async function GET(request: NextRequest) {
           console.error(`[SSE] Heartbeat error for connection ${connectionId}:`, error)
           clearInterval(heartbeat)
         }
-      }, 30000) // 每30秒发送一次心跳
+      }, 10000) // 每10秒发送一次心跳（开发环境更频繁）
 
       // 清理函数
       const cleanup = () => {
         activeConnections--
         console.log(`[SSE] Connection ${connectionId} closed, remaining active: ${activeConnections}`)
-        scoringStore.removeEventListener(listener)
+        enhancedScoringStore.removeEventListener(listener)
         clearInterval(heartbeat)
         try {
           controller.close()

@@ -453,6 +453,52 @@ class ScoringStore {
     }
   }
 
+  // 新增：设置当前面试项目（统一处理题目和面试环节）
+  setCurrentInterviewItem(itemId: string) {
+    const item = this.interviewItems.get(itemId)
+    if (item) {
+      this.displaySession.currentInterviewItem = {
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        subtitle: item.subtitle,
+        content: item.content,
+        timeLimit: item.timeLimit,
+        startTime: Date.now(),
+      }
+
+      // 为了向后兼容，如果是题目类型，也更新currentQuestion
+      if (item.type === 'question') {
+        this.displaySession.currentQuestion = {
+          id: item.id,
+          title: item.title,
+          content: item.content || '',
+          timeLimit: item.timeLimit || 300,
+          startTime: Date.now(),
+        }
+      }
+
+      console.log("Setting current interview item:", this.displaySession.currentInterviewItem)
+      this.emitEvent({
+        type: "interview_item_changed",
+        data: {
+          item: this.displaySession.currentInterviewItem,
+          displaySession: this.displaySession
+        },
+        timestamp: Date.now(),
+      })
+
+      // 为了向后兼容，也发送question_changed事件
+      if (item.type === 'question') {
+        this.emitEvent({
+          type: "question_changed",
+          data: { question: this.displaySession.currentQuestion, displaySession: this.displaySession },
+          timestamp: Date.now(),
+        })
+      }
+    }
+  }
+
   // 获取当前候选人
   getCurrentCandidate(): Candidate | null {
     return this.currentCandidateId ? this.candidates.get(this.currentCandidateId) || null : null

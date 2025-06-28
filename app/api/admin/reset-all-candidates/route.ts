@@ -1,19 +1,20 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { scoringStore } from "@/lib/scoring-store"
+import { enhancedScoringStore } from "@/lib/scoring-store-enhanced"
 
 export async function POST(request: NextRequest) {
   try {
+    await enhancedScoringStore.initialize()
     console.log("[API] Resetting all candidates status...")
-    
-    scoringStore.resetAllCandidatesStatus()
-    
-    const candidates = scoringStore.getCandidates()
-    const currentCandidate = scoringStore.getCurrentCandidate()
-    
+
+    enhancedScoringStore.resetAllCandidatesStatus()
+
+    const candidates = enhancedScoringStore.getCandidates()
+    const currentCandidate = enhancedScoringStore.getCurrentCandidate()
+
     console.log("[API] All candidates status reset. Current candidate:", currentCandidate?.name || "none")
-    
-    return NextResponse.json({ 
-      success: true, 
+
+    return NextResponse.json({
+      success: true,
       message: "所有候选人状态已重置",
       candidates,
       currentCandidate
