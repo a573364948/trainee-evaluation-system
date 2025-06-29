@@ -1,0 +1,350 @@
+{
+  "systemConfig": {
+    "activeBatchId": "legacy-batch-1751179039690",
+    "defaultSettings": {
+      "maxScore": 100,
+      "precision": "integer",
+      "calculationMethod": "weighted",
+      "autoRefresh": true,
+      "refreshInterval": 5000
+    }
+  },
+  "batches": [
+    {
+      "id": "legacy-batch-1751179039690",
+      "name": "历史数据批次",
+      "description": "系统升级前的数据自动迁移",
+      "status": "active",
+      "createdAt": 1751179039690,
+      "updatedAt": 1751188937275,
+      "lastActiveAt": 1751188937275,
+      "config": {
+        "judges": [
+          {
+            "name": "张主任",
+            "password": "123456",
+            "isActive": true
+          },
+          {
+            "name": "李经理",
+            "password": "123456",
+            "isActive": false
+          },
+          {
+            "name": "王专家",
+            "password": "123456",
+            "isActive": false
+          },
+          {
+            "name": "赵组长",
+            "password": "123456",
+            "isActive": false
+          },
+          {
+            "name": "陈主管",
+            "password": "123456",
+            "isActive": false
+          }
+        ],
+        "dimensions": [
+          {
+            "name": "专业能力",
+            "description": "专业知识掌握程度和实际应用能力",
+            "maxScore": 25,
+            "weight": 25,
+            "order": 1,
+            "isActive": true
+          },
+          {
+            "name": "沟通表达",
+            "description": "语言表达清晰度和沟通技巧",
+            "maxScore": 20,
+            "weight": 20,
+            "order": 2,
+            "isActive": true
+          },
+          {
+            "name": "领导能力",
+            "description": "团队管理和决策能力",
+            "maxScore": 25,
+            "weight": 25,
+            "order": 3,
+            "isActive": true
+          },
+          {
+            "name": "应急处理",
+            "description": "突发情况的应对和处理能力",
+            "maxScore": 15,
+            "weight": 15,
+            "order": 4,
+            "isActive": true
+          },
+          {
+            "name": "综合素质",
+            "description": "整体素养和职业形象",
+            "maxScore": 15,
+            "weight": 15,
+            "order": 5,
+            "isActive": true
+          }
+        ],
+        "scoreItems": [
+          {
+            "name": "笔试成绩",
+            "description": "理论知识考试成绩",
+            "maxScore": 100,
+            "weight": 30,
+            "order": 1,
+            "isActive": true
+          },
+          {
+            "name": "面试成绩",
+            "description": "面试综合评分",
+            "maxScore": 100,
+            "weight": 50,
+            "order": 2,
+            "isActive": true
+          },
+          {
+            "name": "日常表现",
+            "description": "工作表现和综合评价",
+            "maxScore": 100,
+            "weight": 20,
+            "order": 3,
+            "isActive": true
+          }
+        ],
+        "interviewItems": [
+          {
+            "type": "interview_stage",
+            "title": "面试环节1",
+            "subtitle": "自我介绍",
+            "content": "",
+            "timeLimit": 300,
+            "order": 0,
+            "isActive": true
+          },
+          {
+            "type": "question",
+            "title": "专业知识问答",
+            "subtitle": "专业能力",
+            "content": "请简述列车长在日常工作中的主要职责和安全管理要点。",
+            "timeLimit": 300,
+            "order": 1,
+            "isActive": true
+          },
+          {
+            "type": "question",
+            "title": "应急处理场景",
+            "subtitle": "应急处理",
+            "content": "假设列车在运行过程中遇到突发故障，作为列车长您将如何处理？请详细说明处理流程。",
+            "timeLimit": 60,
+            "order": 2,
+            "isActive": true
+          },
+          {
+            "type": "question",
+            "title": "团队管理案例",
+            "subtitle": "领导能力",
+            "content": "描述一次您成功解决团队内部矛盾或协调不同部门合作的经历。",
+            "timeLimit": 360,
+            "order": 3,
+            "isActive": true
+          }
+        ],
+        "systemSettings": {
+          "maxScore": 100,
+          "precision": "integer",
+          "calculationMethod": "weighted",
+          "autoRefresh": true,
+          "refreshInterval": 5000
+        }
+      },
+      "runtime": {
+        "candidates": [
+          {
+            "id": "1",
+            "name": "刘明",
+            "number": "TC001",
+            "department": "运营部",
+            "currentRound": 1,
+            "totalScore": 76,
+            "scores": [
+              {
+                "judgeId": "1",
+                "judgeName": "张主任",
+                "round": 1,
+                "categories": {
+                  "1": 20,
+                  "2": 13,
+                  "3": 18,
+                  "4": 11,
+                  "5": 14
+                },
+                "totalScore": 76,
+                "timestamp": 1751166905788
+              }
+            ],
+            "otherScores": [
+              {
+                "itemId": "1",
+                "itemName": "笔试成绩",
+                "score": 85,
+                "timestamp": 1751038316751
+              },
+              {
+                "itemId": "3",
+                "itemName": "日常表现",
+                "score": 90,
+                "timestamp": 1751038316751
+              }
+            ],
+            "finalScore": 82,
+            "status": "waiting"
+          },
+          {
+            "id": "2",
+            "name": "王芳",
+            "number": "TC002",
+            "department": "调度部",
+            "currentRound": 1,
+            "totalScore": 0,
+            "scores": [],
+            "otherScores": [
+              {
+                "itemId": "1",
+                "itemName": "笔试成绩",
+                "score": 92,
+                "timestamp": 1751038316751
+              },
+              {
+                "itemId": "3",
+                "itemName": "日常表现",
+                "score": 88,
+                "timestamp": 1751038316751
+              }
+            ],
+            "finalScore": 0,
+            "status": "waiting"
+          },
+          {
+            "id": "3",
+            "name": "张强",
+            "number": "TC003",
+            "department": "运营部",
+            "currentRound": 1,
+            "totalScore": 0,
+            "scores": [],
+            "otherScores": [
+              {
+                "itemId": "1",
+                "itemName": "笔试成绩",
+                "score": 78,
+                "timestamp": 1751038316751
+              },
+              {
+                "itemId": "3",
+                "itemName": "日常表现",
+                "score": 85,
+                "timestamp": 1751038316751
+              }
+            ],
+            "finalScore": 0,
+            "status": "waiting"
+          },
+          {
+            "id": "4",
+            "name": "李娜",
+            "number": "TC004",
+            "department": "安全部",
+            "currentRound": 1,
+            "totalScore": 0,
+            "scores": [],
+            "otherScores": [
+              {
+                "itemId": "1",
+                "itemName": "笔试成绩",
+                "score": 88,
+                "timestamp": 1751038316751
+              },
+              {
+                "itemId": "3",
+                "itemName": "日常表现",
+                "score": 92,
+                "timestamp": 1751038316751
+              }
+            ],
+            "finalScore": 0,
+            "status": "waiting"
+          },
+          {
+            "id": "5",
+            "name": "陈伟",
+            "number": "TC005",
+            "department": "调度部",
+            "currentRound": 1,
+            "totalScore": 0,
+            "scores": [],
+            "otherScores": [
+              {
+                "itemId": "1",
+                "itemName": "笔试成绩",
+                "score": 82,
+                "timestamp": 1751038316751
+              },
+              {
+                "itemId": "3",
+                "itemName": "日常表现",
+                "score": 87,
+                "timestamp": 1751038316751
+              }
+            ],
+            "finalScore": 0,
+            "status": "waiting"
+          }
+        ],
+        "currentCandidateId": "1",
+        "currentRound": 1,
+        "displaySession": {
+          "id": "main",
+          "currentStage": "opening",
+          "settings": {
+            "showTimer": true,
+            "showProgress": true,
+            "autoAdvance": false
+          },
+          "currentInterviewItem": {
+            "id": "3",
+            "type": "question",
+            "title": "团队管理案例",
+            "subtitle": "领导能力",
+            "content": "描述一次您成功解决团队内部矛盾或协调不同部门合作的经历。",
+            "timeLimit": 360,
+            "startTime": 1751134138137
+          },
+          "currentQuestion": {
+            "id": "3",
+            "title": "团队管理案例",
+            "content": "描述一次您成功解决团队内部矛盾或协调不同部门合作的经历。",
+            "timeLimit": 360,
+            "startTime": 1751134138137
+          }
+        },
+        "currentStage": "opening",
+        "totalScores": 76,
+        "metadata": {
+          "totalCandidates": 5,
+          "completedCandidates": 0,
+          "averageScore": 15.2,
+          "lastUpdated": 1751188937275
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "version": "2.0.0",
+    "lastUpdated": 1751188937276,
+    "backupCount": 0,
+    "migrationVersion": 1
+  }
+}

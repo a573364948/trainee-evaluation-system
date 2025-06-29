@@ -6,8 +6,23 @@
       "number": "TC001",
       "department": "运营部",
       "currentRound": 1,
-      "totalScore": 0,
-      "scores": [],
+      "totalScore": 76,
+      "scores": [
+        {
+          "judgeId": "1",
+          "judgeName": "张主任",
+          "round": 1,
+          "categories": {
+            "1": 20,
+            "2": 13,
+            "3": 18,
+            "4": 11,
+            "5": 14
+          },
+          "totalScore": 76,
+          "timestamp": 1751166905788
+        }
+      ],
       "otherScores": [
         {
           "itemId": "1",
@@ -22,7 +37,7 @@
           "timestamp": 1751038316751
         }
       ],
-      "finalScore": 0,
+      "finalScore": 82,
       "status": "waiting"
     },
     {
@@ -143,19 +158,19 @@
       "id": "3",
       "name": "王专家",
       "password": "123456",
-      "isActive": true
+      "isActive": false
     },
     {
       "id": "4",
       "name": "赵组长",
       "password": "123456",
-      "isActive": true
+      "isActive": false
     },
     {
       "id": "5",
       "name": "陈主管",
       "password": "123456",
-      "isActive": true
+      "isActive": false
     }
   ],
   "interviewDimensions": [
@@ -250,7 +265,7 @@
       "id": "2",
       "title": "应急处理场景",
       "content": "假设列车在运行过程中遇到突发故障，作为列车长您将如何处理？请详细说明处理流程。",
-      "timeLimit": 420,
+      "timeLimit": 60,
       "category": "应急处理",
       "difficulty": "medium",
       "order": 2,
@@ -294,7 +309,7 @@
       "title": "应急处理场景",
       "subtitle": "应急处理",
       "content": "假设列车在运行过程中遇到突发故障，作为列车长您将如何处理？请详细说明处理流程。",
-      "timeLimit": 420,
+      "timeLimit": 60,
       "order": 2,
       "isActive": true
     },
@@ -311,34 +326,34 @@
   ],
   "displaySession": {
     "id": "main",
-    "currentStage": "questioning",
+    "currentStage": "scoring",
     "settings": {
       "showTimer": true,
       "showProgress": true,
       "autoAdvance": false
     },
     "currentInterviewItem": {
-      "id": "3xgnwij4s",
-      "type": "interview_stage",
-      "title": "面试环节1",
-      "subtitle": "自我介绍",
-      "content": "",
-      "timeLimit": 300,
-      "startTime": 1751085379711
+      "id": "3",
+      "type": "question",
+      "title": "团队管理案例",
+      "subtitle": "领导能力",
+      "content": "描述一次您成功解决团队内部矛盾或协调不同部门合作的经历。",
+      "timeLimit": 360,
+      "startTime": 1751134138137
     },
     "currentQuestion": {
-      "id": "2",
-      "title": "应急处理场景",
-      "content": "假设列车在运行过程中遇到突发故障，作为列车长您将如何处理？请详细说明处理流程。",
-      "timeLimit": 420,
-      "startTime": 1751085377681
+      "id": "3",
+      "title": "团队管理案例",
+      "content": "描述一次您成功解决团队内部矛盾或协调不同部门合作的经历。",
+      "timeLimit": 360,
+      "startTime": 1751134138137
     }
   },
   "currentCandidateId": "1",
   "currentRound": 1,
   "metadata": {
     "version": "1.0.0",
-    "lastUpdated": 1751097708092,
+    "lastUpdated": 1751188594130,
     "backupCount": 1
   }
 }

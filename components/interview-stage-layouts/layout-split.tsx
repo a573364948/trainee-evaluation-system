@@ -67,7 +67,10 @@ export function LayoutSplit({
               </div>
               <div className="text-orange-200 text-xl mb-6">剩余时间</div>
               <Progress
-                value={(timeRemaining / (currentItem.timeLimit * 1000)) * 100}
+                value={(() => {
+                  const totalTime = currentItem.timeLimit * 1000
+                  return totalTime > 0 ? Math.max(0, Math.min(100, (timeRemaining / totalTime) * 100)) : 0
+                })()}
                 className="w-full h-4"
               />
               <div className="flex justify-between text-sm text-orange-300 mt-2">
@@ -85,21 +88,12 @@ export function LayoutSplit({
             评委状态
           </h3>
           <div className="space-y-4">
-            {judges.map((judge) => (
+            {judges.filter(j => j.isActive).map((judge) => (
               <div key={judge.id} className="flex items-center justify-between p-4 bg-white/5 rounded-lg">
                 <span className="text-white">{judge.name}</span>
                 <div className="flex items-center gap-2">
-                  {judge.isActive ? (
-                    <>
-                      <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                      <span className="text-green-400 text-sm">在线</span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-3 h-3 bg-gray-500 rounded-full"></div>
-                      <span className="text-gray-400 text-sm">离线</span>
-                    </>
-                  )}
+                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-green-400 text-sm">在线</span>
                 </div>
               </div>
             ))}
@@ -108,7 +102,7 @@ export function LayoutSplit({
           <div className="mt-6 p-4 bg-blue-900/30 border border-blue-500/30 rounded-lg">
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-300">
-                {judges.filter(j => j.isActive).length} / {judges.length}
+                {judges.filter(j => j.isActive).length}位
               </div>
               <div className="text-blue-200 text-sm">在线评委</div>
             </div>

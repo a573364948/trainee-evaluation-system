@@ -1,5 +1,7 @@
-// 增强版评分存储 - 集成数据库持久化和并发优化
-import { database, type DatabaseData } from './database'
+// 增强版评分存储 - 集成数据库持久化、批次管理和并发优化
+import { database, type DatabaseData, type EnhancedDatabaseData } from './database'
+import { batchManager, type BatchConfig, type RuntimeData } from './batch-manager'
+import { initializeWebSocketManager, broadcastEvent, isWebSocketServerRunning } from './websocket/manager'
 import type {
   Candidate,
   Judge,
@@ -8,6 +10,8 @@ import type {
   InterviewDimension,
   ScoreItem,
   Batch,
+  EnhancedBatch,
+  BatchStatus,
   DisplaySession,
   Question,
   InterviewItem,
@@ -24,6 +28,11 @@ export interface ConnectionInfo {
 }
 
 class EnhancedScoringStore {
+  // 批次管理模式标志
+  private batchMode = false
+  private currentBatchId: string | null = null
+
+  // 原有数据存储（在非批次模式下使用）
   private candidates: Map<string, Candidate> = new Map()
   private judges: Map<string, Judge> = new Map()
   private interviewDimensions: Map<string, InterviewDimension> = new Map()
@@ -70,11 +79,32 @@ class EnhancedScoringStore {
     }
 
     try {
-      console.log('[EnhancedStore] Initializing with database...')
-      const data = await database.initialize()
-      await this.loadFromDatabase(data)
+      console.log('[EnhancedStore] Initializing with enhanced batch management...')
+
+      // 初始化批次管理器
+      await batchManager.initialize()
+
+      // 检查是否有活跃批次
+      const activeBatch = await batchManager.getActiveBatch()
+      if (activeBatch) {
+        console.log('[EnhancedStore] Found active batch, switching to batch mode:', activeBatch.name)
+        await this.switchToBatchMode(activeBatch.id)
+      } else {
+        console.log('[EnhancedStore] No active batch found, using legacy mode')
+        const data = await database.initialize()
+        await this.loadFromDatabase(data)
+      }
+
+      // 初始化WebSocket服务器（只在第一次初始化时）
+      if (!isWebSocketServerRunning()) {
+        console.log('[EnhancedStore] Initializing WebSocket server...')
+        initializeWebSocketManager()
+      } else {
+        console.log('[EnhancedStore] WebSocket server already running')
+      }
+
       this.isInitialized = true
-      console.log('[EnhancedStore] Initialization completed')
+      console.log('[EnhancedStore] Initialization completed with batch management support')
     } catch (error) {
       console.error('[EnhancedStore] Initialization failed:', error)
       // 回退到内存模式
@@ -122,9 +152,197 @@ class EnhancedScoringStore {
   }
 
   private initializeDefaultData(): void {
-    // 和原来的 initializeData 方法相同的逻辑
-    // 这里简化处理，实际使用时从原始的 scoring-store.ts 复制
-    console.log('[EnhancedStore] Using default data (fallback mode)')
+    console.log('[EnhancedStore] Initializing default data (fallback mode)')
+
+    // 添加示例评委
+    const judges: Judge[] = [
+      { id: "1", name: "张主任", password: "123456", isActive: true },
+      { id: "2", name: "李经理", password: "123456", isActive: true },
+      { id: "3", name: "王专家", password: "123456", isActive: true },
+      { id: "4", name: "赵组长", password: "123456", isActive: true },
+      { id: "5", name: "陈主管", password: "123456", isActive: true },
+    ]
+
+    judges.forEach((judge) => this.judges.set(judge.id, judge))
+
+    // 添加示例面试维度
+    const dimensions: InterviewDimension[] = [
+      {
+        id: "1",
+        name: "专业能力",
+        description: "专业知识掌握程度和实际应用能力",
+        maxScore: 25,
+        order: 1,
+        isActive: true,
+      },
+      {
+        id: "2",
+        name: "沟通表达",
+        description: "语言表达清晰度和沟通技巧",
+        maxScore: 20,
+        order: 2,
+        isActive: true,
+      },
+      {
+        id: "3",
+        name: "领导能力",
+        description: "团队管理和决策能力",
+        maxScore: 25,
+        order: 3,
+        isActive: true,
+      },
+      {
+        id: "4",
+        name: "应急处理",
+        description: "突发情况的应对和处理能力",
+        maxScore: 15,
+        order: 4,
+        isActive: true,
+      },
+      {
+        id: "5",
+        name: "综合素质",
+        description: "整体素养和职业形象",
+        maxScore: 15,
+        order: 5,
+        isActive: true,
+      },
+    ]
+
+    dimensions.forEach((dim) => this.interviewDimensions.set(dim.id, dim))
+
+    console.log(`[EnhancedStore] Initialized ${judges.length} judges and ${dimensions.length} dimensions`)
+  }
+
+  // ==================== 批次管理集成 ====================
+
+  // 切换到批次模式
+  async switchToBatchMode(batchId: string): Promise<void> {
+    console.log('[EnhancedStore] Switching to batch mode:', batchId)
+
+    const batch = await batchManager.getBatch(batchId)
+    if (!batch) {
+      throw new Error(`Batch ${batchId} not found`)
+    }
+
+    this.batchMode = true
+    this.currentBatchId = batchId
+
+    // 从批次加载数据到内存
+    await this.loadFromBatch(batch)
+
+    console.log('[EnhancedStore] Successfully switched to batch mode')
+  }
+
+  // 切换到传统模式
+  async switchToLegacyMode(): Promise<void> {
+    console.log('[EnhancedStore] Switching to legacy mode')
+
+    this.batchMode = false
+    this.currentBatchId = null
+
+    // 从数据库加载传统数据
+    const data = await database.initialize()
+    await this.loadFromDatabase(data)
+
+    console.log('[EnhancedStore] Successfully switched to legacy mode')
+  }
+
+  // 从批次加载数据
+  private async loadFromBatch(batch: EnhancedBatch): Promise<void> {
+    // 清空现有数据
+    this.candidates.clear()
+    this.judges.clear()
+    this.interviewDimensions.clear()
+    this.scoreItems.clear()
+    this.questions.clear()
+    this.interviewItems.clear()
+
+    // 加载批次配置数据
+    batch.config.judges.forEach((judgeData, index) => {
+      const id = (index + 1).toString()
+      this.judges.set(id, { ...judgeData, id })
+    })
+
+    batch.config.dimensions.forEach((dimensionData, index) => {
+      const id = (index + 1).toString()
+      this.interviewDimensions.set(id, { ...dimensionData, id })
+    })
+
+    batch.config.scoreItems.forEach((itemData, index) => {
+      const id = (index + 1).toString()
+      this.scoreItems.set(id, { ...itemData, id })
+    })
+
+    batch.config.interviewItems.forEach((itemData, index) => {
+      const id = (index + 1).toString()
+      this.interviewItems.set(id, { ...itemData, id })
+    })
+
+    // 加载批次运行时数据
+    batch.runtime.candidates.forEach(candidate => {
+      this.candidates.set(candidate.id, candidate)
+    })
+
+    this.currentCandidateId = batch.runtime.currentCandidateId || null
+    this.currentRound = batch.runtime.currentRound
+    this.displaySession = batch.runtime.displaySession
+
+    console.log(`[EnhancedStore] Loaded batch data: ${batch.runtime.candidates.length} candidates, ${batch.config.judges.length} judges`)
+  }
+
+  // 保存当前状态到批次
+  private async saveToBatch(): Promise<void> {
+    if (!this.batchMode || !this.currentBatchId) {
+      return
+    }
+
+    const batch = await batchManager.getBatch(this.currentBatchId)
+    if (!batch) {
+      console.error('[EnhancedStore] Current batch not found:', this.currentBatchId)
+      return
+    }
+
+    // 更新批次运行时数据
+    batch.runtime.candidates = Array.from(this.candidates.values())
+    batch.runtime.currentCandidateId = this.currentCandidateId
+    batch.runtime.currentRound = this.currentRound
+    batch.runtime.displaySession = this.displaySession
+    batch.runtime.currentStage = this.displaySession.currentStage
+
+    // 更新元数据
+    batch.runtime.metadata = {
+      totalCandidates: this.candidates.size,
+      completedCandidates: Array.from(this.candidates.values()).filter(c => c.status === 'completed').length,
+      averageScore: this.calculateAverageScore(),
+      lastUpdated: Date.now()
+    }
+
+    batch.runtime.totalScores = Array.from(this.candidates.values())
+      .reduce((total, candidate) => total + (candidate.totalScore || 0), 0)
+
+    batch.lastActiveAt = Date.now()
+    batch.updatedAt = Date.now()
+
+    await batchManager.saveBatch(batch)
+    console.log('[EnhancedStore] Saved current state to batch:', this.currentBatchId)
+  }
+
+  // 计算平均分
+  private calculateAverageScore(): number {
+    const candidates = Array.from(this.candidates.values())
+    if (candidates.length === 0) return 0
+
+    const totalScore = candidates.reduce((sum, candidate) => sum + (candidate.totalScore || 0), 0)
+    return Math.round((totalScore / candidates.length) * 100) / 100
+  }
+
+  // 获取当前批次信息
+  getCurrentBatch(): { batchMode: boolean; batchId: string | null } {
+    return {
+      batchMode: this.batchMode,
+      batchId: this.currentBatchId
+    }
   }
 
   // ==================== 数据持久化 ====================
@@ -134,28 +352,34 @@ class EnhancedScoringStore {
 
     this.pendingSave = true
     try {
-      const data: DatabaseData = {
-        candidates: Array.from(this.candidates.values()),
-        judges: Array.from(this.judges.values()),
-        interviewDimensions: Array.from(this.interviewDimensions.values()),
-        scoreItems: Array.from(this.scoreItems.values()),
-        batches: Array.from(this.batches.values()),
-        questions: Array.from(this.questions.values()),
-        interviewItems: Array.from(this.interviewItems.values()),
-        displaySession: this.displaySession,
-        currentCandidateId: this.currentCandidateId,
-        currentRound: this.currentRound,
-        metadata: {
-          version: "1.0.0",
-          lastUpdated: Date.now(),
-          backupCount: 0
+      if (this.batchMode) {
+        // 批次模式：保存到批次
+        await this.saveToBatch()
+      } else {
+        // 传统模式：保存到数据库
+        const data: DatabaseData = {
+          candidates: Array.from(this.candidates.values()),
+          judges: Array.from(this.judges.values()),
+          interviewDimensions: Array.from(this.interviewDimensions.values()),
+          scoreItems: Array.from(this.scoreItems.values()),
+          batches: Array.from(this.batches.values()),
+          questions: Array.from(this.questions.values()),
+          interviewItems: Array.from(this.interviewItems.values()),
+          displaySession: this.displaySession,
+          currentCandidateId: this.currentCandidateId,
+          currentRound: this.currentRound,
+          metadata: {
+            version: "1.0.0",
+            lastUpdated: Date.now(),
+            backupCount: 0
+          }
         }
-      }
 
-      await database.save(data)
-      console.log('[EnhancedStore] Data saved to database')
+        await database.save(data)
+        console.log('[EnhancedStore] Data saved to database (legacy mode)')
+      }
     } catch (error) {
-      console.error('[EnhancedStore] Failed to save to database:', error)
+      console.error('[EnhancedStore] Failed to save data:', error)
     } finally {
       this.pendingSave = false
     }
@@ -188,11 +412,12 @@ class EnhancedScoringStore {
     this.connections.set(connectionId, connection)
     console.log(`[EnhancedStore] New ${type} connection: ${connectionId}`)
 
-    this.emitEvent({
-      type: "connection_changed",
-      data: { connected: true, connectionId, type, judgeId },
-      timestamp: Date.now(),
-    })
+    // 连接事件现在由WebSocket管理器统一处理，避免重复发送
+    // this.emitEvent({
+    //   type: "connection_changed",
+    //   data: { connected: true, connectionId, type, judgeId },
+    //   timestamp: Date.now(),
+    // })
 
     return connectionId
   }
@@ -213,16 +438,17 @@ class EnhancedScoringStore {
       this.connections.delete(connectionId)
       console.log(`[EnhancedStore] Connection removed: ${connectionId}`)
 
-      this.emitEvent({
-        type: "connection_changed",
-        data: { 
-          connected: false, 
-          connectionId, 
-          type: connection.type, 
-          judgeId: connection.judgeId 
-        },
-        timestamp: Date.now(),
-      })
+      // 连接事件现在由WebSocket管理器统一处理，避免重复发送
+      // this.emitEvent({
+      //   type: "connection_changed",
+      //   data: {
+      //     connected: false,
+      //     connectionId,
+      //     type: connection.type,
+      //     judgeId: connection.judgeId
+      //   },
+      //   timestamp: Date.now(),
+      // })
     }
   }
 
@@ -240,17 +466,18 @@ class EnhancedScoringStore {
           connection.isActive = false
           console.log(`[EnhancedStore] Connection timeout: ${connectionId}`)
           
-          this.emitEvent({
-            type: "connection_changed",
-            data: { 
-              connected: false, 
-              connectionId, 
-              type: connection.type, 
-              judgeId: connection.judgeId,
-              reason: 'timeout'
-            },
-            timestamp: Date.now(),
-          })
+          // 连接事件现在由WebSocket管理器统一处理，避免重复发送
+          // this.emitEvent({
+          //   type: "connection_changed",
+          //   data: {
+          //     connected: false,
+          //     connectionId,
+          //     type: connection.type,
+          //     judgeId: connection.judgeId,
+          //     reason: 'timeout'
+          //   },
+          //   timestamp: Date.now(),
+          // })
         }
       }
 
@@ -329,12 +556,85 @@ class EnhancedScoringStore {
     return Array.from(this.candidates.values())
   }
 
+  // ==================== 候选人管理 ====================
+
+  updateCandidate(id: string, updates: Partial<Candidate>) {
+    const candidate = this.candidates.get(id)
+    if (candidate) {
+      Object.assign(candidate, updates)
+
+      // 重新计算最终得分
+      this.calculateFinalScore(id)
+
+      this.debouncedSave() // 触发保存
+
+      this.emitEvent({
+        type: "candidate_changed",
+        data: candidate,
+        timestamp: Date.now(),
+      })
+      return candidate
+    }
+    return null
+  }
+
   getJudges(): Judge[] {
     return Array.from(this.judges.values())
   }
 
   getInterviewDimensions(): InterviewDimension[] {
     return Array.from(this.interviewDimensions.values()).sort((a, b) => a.order - b.order)
+  }
+
+  // ==================== 面试维度管理 ====================
+
+  addInterviewDimension(dimension: Omit<InterviewDimension, "id">) {
+    const id = Date.now().toString()
+    const newDimension: InterviewDimension = { ...dimension, id }
+    this.interviewDimensions.set(id, newDimension)
+
+    this.debouncedSave() // 触发保存
+
+    this.emitEvent({
+      type: "dimension_changed",
+      data: newDimension,
+      timestamp: Date.now(),
+    })
+    return newDimension
+  }
+
+  updateInterviewDimension(id: string, updates: Partial<Omit<InterviewDimension, "id">>) {
+    const dimension = this.interviewDimensions.get(id)
+    if (dimension) {
+      Object.assign(dimension, updates)
+
+      this.debouncedSave() // 触发保存
+
+      this.emitEvent({
+        type: "dimension_changed",
+        data: dimension,
+        timestamp: Date.now(),
+      })
+      return dimension
+    }
+    return null
+  }
+
+  deleteInterviewDimension(id: string) {
+    const dimension = this.interviewDimensions.get(id)
+    if (dimension) {
+      this.interviewDimensions.delete(id)
+
+      this.debouncedSave() // 触发保存
+
+      this.emitEvent({
+        type: "dimension_changed",
+        data: { deleted: true, id },
+        timestamp: Date.now(),
+      })
+      return true
+    }
+    return false
   }
 
   getScoreItems(): ScoreItem[] {
@@ -349,15 +649,50 @@ class EnhancedScoringStore {
     return this.displaySession
   }
 
-  setDisplayStage(stage: "opening" | "questioning" | "scoring") {
+  setDisplayStage(stage: "opening" | "interviewing" | "scoring") {
     this.displaySession.currentStage = stage
+
+    // 切换环节时重置倒计时状态
+    if (stage !== "interviewing") {
+      // 非答题环节时，清除倒计时状态
+      this.displaySession.timerState = undefined
+      console.log('[Stage] Cleared timer state for non-interviewing stage:', stage)
+    } else {
+      // 切换到答题环节时，如果有当前面试项目且有时间限制，重置倒计时
+      const currentItem = this.displaySession.currentInterviewItem
+      if (currentItem && currentItem.timeLimit) {
+        this.displaySession.timerState = {
+          isRunning: false,
+          isPaused: false,
+          remainingTime: currentItem.timeLimit * 1000,
+          totalTime: currentItem.timeLimit * 1000,
+          startTime: undefined,
+          pausedTime: undefined,
+        }
+        console.log('[Stage] Reset timer state for interviewing stage, duration:', currentItem.timeLimit, 'seconds')
+      }
+    }
+
     this.debouncedSave() // 触发保存
-    
+
+    // 创建一个干净的 displaySession 副本以避免序列化问题
+    const cleanDisplaySession = {
+      id: this.displaySession.id,
+      currentStage: this.displaySession.currentStage,
+      currentQuestion: this.displaySession.currentQuestion,
+      currentInterviewItem: this.displaySession.currentInterviewItem,
+      timerState: this.displaySession.timerState,
+      settings: this.displaySession.settings
+    }
+
     this.emitEvent({
       type: "stage_changed",
-      data: { stage, displaySession: this.displaySession },
+      data: { stage, displaySession: cleanDisplaySession },
       timestamp: Date.now(),
     })
+
+    // 发送倒计时状态更新事件
+    this.emitTimerEvent()
   }
 
   setCurrentQuestion(questionId: string) {
@@ -373,9 +708,19 @@ class EnhancedScoringStore {
       
       this.debouncedSave() // 触发保存
       
+      // 创建一个干净的 displaySession 副本以避免序列化问题
+      const cleanDisplaySession = {
+        id: this.displaySession.id,
+        currentStage: this.displaySession.currentStage,
+        currentQuestion: this.displaySession.currentQuestion,
+        currentInterviewItem: this.displaySession.currentInterviewItem,
+        timerState: this.displaySession.timerState,
+        settings: this.displaySession.settings
+      }
+
       this.emitEvent({
         type: "question_changed",
-        data: { question: this.displaySession.currentQuestion, displaySession: this.displaySession },
+        data: { question: this.displaySession.currentQuestion, displaySession: cleanDisplaySession },
         timestamp: Date.now(),
       })
     }
@@ -420,14 +765,21 @@ class EnhancedScoringStore {
 
     if (!candidate || !judge) return false
 
-    const totalScore = Object.values(categories).reduce((sum, score) => sum + score, 0)
+    // 确保所有分数都是数字类型
+    const normalizedCategories: Record<string, number> = {}
+    Object.entries(categories).forEach(([key, value]) => {
+      normalizedCategories[key] = Number(value) || 0
+    })
+
+    // 直接相加各维度分数，不使用权重
+    const totalScore = Object.values(normalizedCategories).reduce((sum, score) => sum + score, 0)
 
     const score: Score = {
       judgeId,
       judgeName: judge.name,
       round: this.currentRound,
-      categories,
-      totalScore,
+      categories: normalizedCategories,
+      totalScore: Number(totalScore) || 0,
       timestamp: Date.now(),
     }
 
@@ -439,7 +791,7 @@ class EnhancedScoringStore {
     const currentRoundScores = candidate.scores.filter((s) => s.round === this.currentRound)
     candidate.totalScore =
       currentRoundScores.length > 0
-        ? Math.round(currentRoundScores.reduce((sum, s) => sum + s.totalScore, 0) / currentRoundScores.length)
+        ? Math.round(currentRoundScores.reduce((sum, s) => sum + (Number(s.totalScore) || 0), 0) / currentRoundScores.length)
         : 0
 
     // 重新计算最终得分
@@ -495,14 +847,114 @@ class EnhancedScoringStore {
   }
 
   private emitEvent(event: ScoringEvent) {
-    console.log(`[EnhancedStore] Emitting event ${event.type} to ${this.eventListeners.length} listeners`)
+    // 发送到SSE监听器（向后兼容）
+    console.log(`[EnhancedStore] Emitting event ${event.type} to ${this.eventListeners.length} SSE listeners`)
     this.eventListeners.forEach((listener, index) => {
       try {
         listener(event)
       } catch (error) {
-        console.error(`[EnhancedStore] Error in listener ${index} for event ${event.type}:`, error)
+        console.error(`[EnhancedStore] Error in SSE listener ${index} for event ${event.type}:`, error)
       }
     })
+
+    // 发送到WebSocket客户端
+    if (isWebSocketServerRunning()) {
+      try {
+        broadcastEvent(event)
+        console.log(`[EnhancedStore] Event ${event.type} broadcasted via WebSocket`)
+      } catch (error) {
+        console.error(`[EnhancedStore] Error broadcasting WebSocket event ${event.type}:`, error)
+      }
+    } else {
+      console.warn(`[EnhancedStore] WebSocket server not running, event ${event.type} only sent via SSE`)
+    }
+  }
+
+  // ==================== 评委管理 ====================
+
+  addJudge(judge: Omit<Judge, "id">) {
+    const id = Date.now().toString()
+    const newJudge: Judge = { ...judge, id }
+    this.judges.set(id, newJudge)
+
+    this.debouncedSave() // 触发保存
+
+    this.emitEvent({
+      type: "judge_changed",
+      data: newJudge,
+      timestamp: Date.now(),
+    })
+    return newJudge
+  }
+
+  updateJudge(id: string, updates: Partial<Omit<Judge, "id">>) {
+    const judge = this.judges.get(id)
+    if (judge) {
+      Object.assign(judge, updates)
+
+      this.debouncedSave() // 触发保存
+
+      this.emitEvent({
+        type: "judge_changed",
+        data: judge,
+        timestamp: Date.now(),
+      })
+      return judge
+    }
+    return null
+  }
+
+  deleteJudge(id: string) {
+    const judge = this.judges.get(id)
+    if (judge) {
+      this.judges.delete(id)
+
+      this.debouncedSave() // 触发保存
+
+      this.emitEvent({
+        type: "judge_changed",
+        data: { ...judge, deleted: true },
+        timestamp: Date.now(),
+      })
+      return true
+    }
+    return false
+  }
+
+  setJudgeOnlineStatus(id: string, isActive: boolean) {
+    const judge = this.judges.get(id)
+    if (judge) {
+      judge.isActive = isActive
+
+      this.debouncedSave() // 触发保存
+
+      this.emitEvent({
+        type: "judge_changed",
+        data: judge,
+        timestamp: Date.now(),
+      })
+      return judge
+    }
+    return null
+  }
+
+  // 更新评委在线状态（不影响启用状态）
+  updateJudgeOnlineStatus(id: string, isOnline: boolean) {
+    const judge = this.judges.get(id)
+    if (judge) {
+      // 这里我们可以添加一个 isOnline 字段，或者通过连接管理来跟踪
+      // 暂时通过连接管理来处理在线状态
+      console.log(`[Store] Judge ${judge.name} online status updated:`, isOnline)
+
+      // 发送在线状态变更事件
+      this.emitEvent({
+        type: "judge_online_status_changed",
+        data: { judgeId: id, isOnline, judge },
+        timestamp: Date.now(),
+      })
+      return judge
+    }
+    return null
   }
 
   // ==================== 面试项目管理 ====================
@@ -587,6 +1039,69 @@ class EnhancedScoringStore {
     } else {
       // 如果不是题目类型，从questions中删除
       this.questions.delete(item.id)
+    }
+
+    // 检查是否是当前选中的面试项目，如果是则需要更新相关状态
+    const currentItem = this.displaySession.currentInterviewItem
+    if (currentItem && currentItem.id === item.id) {
+      console.log('[UpdateItem] Updating current interview item:', item.id, 'new timeLimit:', item.timeLimit)
+
+      // 更新当前面试项目的信息
+      this.displaySession.currentInterviewItem = {
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        subtitle: item.subtitle,
+        content: item.content,
+        timeLimit: item.timeLimit,
+        startTime: currentItem.startTime, // 保持原有的开始时间
+      }
+
+      // 更新倒计时状态（重置为新的时间限制）
+      if (item.timeLimit) {
+        this.displaySession.timerState = {
+          isRunning: false,
+          isPaused: false,
+          remainingTime: item.timeLimit * 1000, // 转换为毫秒
+          totalTime: item.timeLimit * 1000,
+          startTime: undefined,
+          pausedTime: undefined,
+        }
+        console.log('[UpdateItem] Updated timer state with new duration:', item.timeLimit, 'seconds')
+      } else {
+        this.displaySession.timerState = undefined
+        console.log('[UpdateItem] Cleared timer state (no time limit)')
+      }
+
+      // 如果是题目类型，也更新currentQuestion
+      if (item.type === 'question') {
+        this.displaySession.currentQuestion = {
+          id: item.id,
+          title: item.title,
+          content: item.content || '',
+          timeLimit: item.timeLimit || 300,
+          startTime: currentItem.startTime, // 保持原有的开始时间
+        }
+      }
+
+      // 发送更新事件
+      this.emitEvent({
+        type: "interview_item_changed",
+        data: { item: this.displaySession.currentInterviewItem },
+        timestamp: Date.now(),
+      })
+
+      // 发送倒计时状态更新事件
+      this.emitTimerEvent()
+
+      // 如果是题目类型，也发送question_changed事件以保持兼容性
+      if (item.type === 'question') {
+        this.emitEvent({
+          type: "question_changed",
+          data: { question: this.displaySession.currentQuestion },
+          timestamp: Date.now(),
+        })
+      }
     }
 
     this.saveToDatabase()
@@ -760,6 +1275,22 @@ class EnhancedScoringStore {
     this.saveToDatabase()
   }
 
+  // 新增：倒计时归零功能
+  setTimerToZero() {
+    if (!this.displaySession.timerState) return
+
+    this.displaySession.timerState.isRunning = false
+    this.displaySession.timerState.isPaused = false
+    this.displaySession.timerState.remainingTime = 0
+    this.displaySession.timerState.startTime = undefined
+    this.displaySession.timerState.pausedTime = undefined
+    // 保持原有的 totalTime，这样重置时可以恢复
+
+    console.log('[Timer] Set timer to zero, totalTime preserved:', this.displaySession.timerState.totalTime)
+    this.emitTimerEvent()
+    this.saveToDatabase()
+  }
+
   getTimerState() {
     return this.displaySession.timerState
   }
@@ -772,12 +1303,93 @@ class EnhancedScoringStore {
     })
   }
 
-  // ==================== 批次管理 ====================
+  // ==================== 增强批次管理 ====================
 
+  // 获取所有批次（增强版）
+  async getEnhancedBatches(): Promise<EnhancedBatch[]> {
+    return await batchManager.getAllBatches()
+  }
+
+  // 获取传统批次（向后兼容）
   getBatches(): Batch[] {
     return Array.from(this.batches.values()).sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
+  // 创建新批次（增强版）
+  async createEnhancedBatch(name: string, description: string): Promise<EnhancedBatch> {
+    const config: BatchConfig = {
+      name,
+      description,
+      judges: Array.from(this.judges.values()),
+      dimensions: Array.from(this.interviewDimensions.values()),
+      scoreItems: Array.from(this.scoreItems.values()),
+      interviewItems: Array.from(this.interviewItems.values())
+    }
+
+    const batch = await batchManager.createBatch(config)
+
+    this.emitEvent({
+      type: "batch_changed",
+      data: batch,
+      timestamp: Date.now(),
+    })
+
+    return batch
+  }
+
+  // 开始批次
+  async startBatch(batchId: string): Promise<void> {
+    await batchManager.startBatch(batchId)
+    await this.switchToBatchMode(batchId)
+
+    this.emitEvent({
+      type: "batch_started",
+      data: { batchId },
+      timestamp: Date.now(),
+    })
+  }
+
+  // 暂停批次
+  async pauseBatch(batchId: string): Promise<void> {
+    await batchManager.pauseBatch(batchId)
+
+    this.emitEvent({
+      type: "batch_paused",
+      data: { batchId },
+      timestamp: Date.now(),
+    })
+  }
+
+  // 恢复批次
+  async resumeBatch(batchId: string): Promise<void> {
+    await batchManager.resumeBatch(batchId)
+    await this.switchToBatchMode(batchId)
+
+    this.emitEvent({
+      type: "batch_resumed",
+      data: { batchId },
+      timestamp: Date.now(),
+    })
+  }
+
+  // 完成批次
+  async completeBatch(batchId: string): Promise<void> {
+    await batchManager.completeBatch(batchId)
+    await this.switchToLegacyMode()
+
+    this.emitEvent({
+      type: "batch_completed",
+      data: { batchId },
+      timestamp: Date.now(),
+    })
+  }
+
+  // 获取活跃批次
+  async getActiveBatch(): Promise<EnhancedBatch | null> {
+    return await batchManager.getActiveBatch()
+  }
+
+  // 传统批次保存（向后兼容）
   saveBatch(batchData: Omit<Batch, "id" | "createdAt" | "updatedAt">): Batch {
     const id = Date.now().toString()
     const now = Date.now()
@@ -812,6 +1424,28 @@ class EnhancedScoringStore {
     return batch
   }
 
+  // 加载增强批次
+  async loadEnhancedBatch(batchId: string): Promise<boolean> {
+    try {
+      const batch = await batchManager.getBatch(batchId)
+      if (!batch) return false
+
+      await this.switchToBatchMode(batchId)
+
+      this.emitEvent({
+        type: "batch_loaded",
+        data: batch,
+        timestamp: Date.now(),
+      })
+
+      return true
+    } catch (error) {
+      console.error('[EnhancedStore] Failed to load enhanced batch:', error)
+      return false
+    }
+  }
+
+  // 传统批次加载（向后兼容）
   loadBatch(batchId: string): boolean {
     const batch = this.batches.get(batchId)
     if (!batch) return false

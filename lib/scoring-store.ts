@@ -56,7 +56,6 @@ class ScoringStore {
         name: "专业能力",
         description: "专业知识掌握程度和实际应用能力",
         maxScore: 25,
-        weight: 25,
         order: 1,
         isActive: true,
       },
@@ -65,7 +64,6 @@ class ScoringStore {
         name: "沟通表达",
         description: "语言表达清晰度和沟通技巧",
         maxScore: 20,
-        weight: 20,
         order: 2,
         isActive: true,
       },
@@ -74,7 +72,6 @@ class ScoringStore {
         name: "领导能力",
         description: "团队管理和决策能力",
         maxScore: 25,
-        weight: 25,
         order: 3,
         isActive: true,
       },
@@ -83,7 +80,6 @@ class ScoringStore {
         name: "应急处理",
         description: "突发情况的应对和处理能力",
         maxScore: 15,
-        weight: 15,
         order: 4,
         isActive: true,
       },
@@ -92,7 +88,6 @@ class ScoringStore {
         name: "综合素质",
         description: "整体素养和职业形象",
         maxScore: 15,
-        weight: 15,
         order: 5,
         isActive: true,
       },
@@ -290,7 +285,6 @@ class ScoringStore {
             name: "专业能力",
             description: "专业知识掌握程度和实际应用能力",
             maxScore: 25,
-            weight: 25,
             order: 1,
             isActive: true,
           },
@@ -298,7 +292,6 @@ class ScoringStore {
             name: "沟通表达",
             description: "语言表达清晰度和沟通技巧",
             maxScore: 20,
-            weight: 20,
             order: 2,
             isActive: true,
           },
@@ -306,7 +299,6 @@ class ScoringStore {
             name: "领导能力",
             description: "团队管理和决策能力",
             maxScore: 25,
-            weight: 25,
             order: 3,
             isActive: true,
           },
@@ -314,7 +306,6 @@ class ScoringStore {
             name: "应急处理",
             description: "突发情况的应对和处理能力",
             maxScore: 15,
-            weight: 15,
             order: 4,
             isActive: true,
           },
@@ -322,7 +313,6 @@ class ScoringStore {
             name: "综合素质",
             description: "整体素养和职业形象",
             maxScore: 15,
-            weight: 15,
             order: 5,
             isActive: true,
           },
@@ -423,7 +413,7 @@ class ScoringStore {
   }
 
   // 设置显示环节
-  setDisplayStage(stage: "opening" | "questioning" | "scoring") {
+  setDisplayStage(stage: "opening" | "interviewing" | "scoring") {
     this.displaySession.currentStage = stage
     console.log("Setting display stage to:", stage) // 添加调试日志
     this.emitEvent({
@@ -539,6 +529,7 @@ class ScoringStore {
 
     if (!candidate || !judge) return false
 
+    // 直接相加各维度分数，不使用权重
     const totalScore = Object.values(categories).reduce((sum, score) => sum + score, 0)
 
     const score: Score = {

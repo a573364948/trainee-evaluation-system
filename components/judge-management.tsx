@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useWebSocket } from "@/hooks/useWebSocket"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -26,8 +27,17 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Plus, Edit, Trash2, Users, UserX, Circle, Target, Settings } from "lucide-react"
+import { Plus, Edit, Trash2, Users, UserX, Circle } from "lucide-react"
 import type { Judge, Candidate } from "@/types/scoring"
+
+// 连接状态接口
+interface ConnectionStatus {
+  id: string
+  type: 'judge' | 'admin' | 'display'
+  connected: boolean
+  lastHeartbeat: number
+  judgeId?: string
+}
 
 interface JudgeManagementProps {
   judges: Judge[]
@@ -48,6 +58,93 @@ export default function JudgeManagement({ judges, candidates, currentCandidate, 
     isActive: true,
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus[]>([])
+
+  // 使用 WebSocket 监听实时事件
+  const { isConnected, onScoringEvent } = useWebSocket({
+    clientType: 'admin',  // 指定客户端类型为管理端
+    autoConnect: true
+  })
+
+  // 监听WebSocket事件
+  useEffect(() => {
+    if (isConnected) {
+      const unsubscribe = onScoringEvent((event) => {
+        console.log('[JudgeManagement] Received WebSocket event:', event.type)
+        // 监听评委在线状态变化事件
+        if (event.type === 'judge_online_status_changed' ||
+            event.type === 'judge_changed' ||
+            event.type === 'connection_status_update' ||
+            event.type === 'connection_summary') {
+          // 实时更新连接状态
+          fetchConnectionStatus()
+        }
+      })
+      return unsubscribe
+    }
+  }, [isConnected])
+
+  // 获取 WebSocket 连接状态
+  const fetchConnectionStatus = async () => {
+    try {
+      const response = await fetch('/api/websocket')
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[JudgeManagement] WebSocket API response:', data)
+        if (data.success && data.data.connections) {
+          console.log('[JudgeManagement] Setting connection status:', data.data.connections)
+          setConnectionStatus(data.data.connections)
+
+          // 调试信息：显示每个评委的在线状态
+          judges.forEach(judge => {
+            const isOnline = data.data.connections.find((conn: any) =>
+              conn.type === 'judge' && conn.judgeId === judge.id && conn.connected
+            )
+            console.log(`[JudgeManagement] Judge ${judge.name} (${judge.id}) online status:`, !!isOnline)
+          })
+        } else {
+          console.log('[JudgeManagement] No connections data in response')
+          setConnectionStatus([])
+        }
+      } else {
+        console.log('[JudgeManagement] WebSocket API response not ok:', response.status)
+      }
+    } catch (error) {
+      console.error('获取连接状态失败:', error)
+      setConnectionStatus([])
+    }
+  }
+
+  // 初始化和定期更新连接状态
+  useEffect(() => {
+    fetchConnectionStatus()
+    const interval = setInterval(fetchConnectionStatus, 30000) // 每30秒更新一次作为备份
+    return () => clearInterval(interval)
+  }, [])
+
+  // 检查评委是否真正在线
+  const isJudgeReallyOnline = (judgeId: string): boolean => {
+    const connection = connectionStatus.find(conn =>
+      conn.type === 'judge' && conn.judgeId === judgeId && conn.connected
+    )
+
+    // 检查连接是否在最近2分钟内有心跳
+    if (connection) {
+      const now = Date.now()
+      const timeSinceLastHeartbeat = now - connection.lastHeartbeat
+      const isRecentlyActive = timeSinceLastHeartbeat < 120000 // 2分钟
+
+      console.log(`[JudgeManagement] Judge ${judgeId} connection check:`, {
+        connected: connection.connected,
+        timeSinceLastHeartbeat,
+        isRecentlyActive
+      })
+
+      return connection.connected && isRecentlyActive
+    }
+
+    return false
+  }
 
   const resetForm = () => {
     setFormData({
@@ -177,18 +274,29 @@ export default function JudgeManagement({ judges, candidates, currentCandidate, 
       )
     }
 
-    return (
-      <Badge variant="default" className="flex items-center gap-1">
-        <Circle className="h-3 w-3 fill-green-500 text-green-500" />
-        在线
-      </Badge>
-    )
+    const isOnline = isJudgeReallyOnline(judge.id)
+
+    if (isOnline) {
+      return (
+        <Badge variant="default" className="flex items-center gap-1">
+          <Circle className="h-3 w-3 fill-green-500 text-green-500" />
+          在线
+        </Badge>
+      )
+    } else {
+      return (
+        <Badge variant="outline" className="flex items-center gap-1">
+          <Circle className="h-3 w-3 fill-orange-400 text-orange-400" />
+          离线
+        </Badge>
+      )
+    }
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-      {/* 左侧评委管理 */}
-      <div className="xl:col-span-2 space-y-6">
+    <div className="space-y-6">
+      {/* 评委管理 */}
+      <div className="space-y-6">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -204,8 +312,14 @@ export default function JudgeManagement({ judges, candidates, currentCandidate, 
                   总评委数: <span className="font-semibold">{judges.length}</span>
                 </div>
                 <div className="text-sm text-gray-600">
+                  启用评委:{" "}
+                  <span className="font-semibold text-blue-600">{judges.filter((j) => j.isActive).length}</span>
+                </div>
+                <div className="text-sm text-gray-600">
                   在线评委:{" "}
-                  <span className="font-semibold text-green-600">{judges.filter((j) => j.isActive).length}</span>
+                  <span className="font-semibold text-green-600">
+                    {judges.filter((j) => j.isActive && isJudgeReallyOnline(j.id)).length}
+                  </span>
                 </div>
               </div>
               <Button onClick={() => setShowAddDialog(true)} className="flex items-center gap-2">
@@ -271,26 +385,6 @@ export default function JudgeManagement({ judges, candidates, currentCandidate, 
                 <p className="text-sm">点击"添加评委"开始添加</p>
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* 右侧配置面板 */}
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Target className="h-5 w-5" />
-              评分配置
-            </CardTitle>
-            <CardDescription>面试维度和成绩项目配置已移至"评分设置"模块</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-center py-8">
-              <Settings className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-gray-500 mb-4">评分维度和成绩项目的配置功能已整合到评分设置中</p>
-              <p className="text-sm text-gray-400">请前往左侧导航的"评分设置"进行配置</p>
-            </div>
           </CardContent>
         </Card>
       </div>

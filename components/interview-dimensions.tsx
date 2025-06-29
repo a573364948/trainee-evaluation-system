@@ -45,7 +45,6 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
     name: "",
     description: "",
     maxScore: 20,
-    weight: 20,
     order: 1,
     isActive: true,
   })
@@ -56,7 +55,6 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
       name: "",
       description: "",
       maxScore: 20,
-      weight: 20,
       order: dimensions.length + 1,
       isActive: true,
     })
@@ -136,7 +134,6 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
       name: dimension.name,
       description: dimension.description,
       maxScore: dimension.maxScore,
-      weight: dimension.weight,
       order: dimension.order,
       isActive: dimension.isActive,
     })
@@ -148,7 +145,6 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
     setShowDeleteDialog(true)
   }
 
-  const totalWeight = dimensions.filter((d) => d.isActive).reduce((sum, d) => sum + d.weight, 0)
   const totalMaxScore = dimensions.filter((d) => d.isActive).reduce((sum, d) => sum + d.maxScore, 0)
 
   return (
@@ -159,19 +155,18 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
             <Target className="h-5 w-5" />
             面试维度管理
           </CardTitle>
-          <CardDescription>配置面试评分维度和权重分配</CardDescription>
+          <CardDescription>配置面试评分维度，各维度分数直接相加构成面试总分</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-4 text-sm">
               <div className="text-gray-600">
-                总权重:{" "}
-                <span className={`font-semibold ${totalWeight === 100 ? "text-green-600" : "text-red-600"}`}>
-                  {totalWeight}%
+                面试总分: <span className={`font-semibold ${totalMaxScore === 100 ? "text-green-600" : "text-red-600"}`}>
+                  {totalMaxScore}分
                 </span>
-              </div>
-              <div className="text-gray-600">
-                总分: <span className="font-semibold text-blue-600">{totalMaxScore}分</span>
+                {totalMaxScore !== 100 && (
+                  <span className="text-red-500 text-xs ml-2">建议设置为100分</span>
+                )}
               </div>
             </div>
             <Button onClick={() => setShowAddDialog(true)} size="sm" className="flex items-center gap-2">
@@ -180,10 +175,10 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
             </Button>
           </div>
 
-          {totalWeight !== 100 && dimensions.filter((d) => d.isActive).length > 0 && (
+          {totalMaxScore !== 100 && dimensions.filter((d) => d.isActive).length > 0 && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-yellow-600" />
-              <span className="text-yellow-700 text-sm">权重总和应为100%，当前为{totalWeight}%</span>
+              <span className="text-yellow-700 text-sm">建议将面试总分设置为100分，当前为{totalMaxScore}分</span>
             </div>
           )}
 
@@ -192,7 +187,6 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
               <TableRow>
                 <TableHead>维度名称</TableHead>
                 <TableHead>满分</TableHead>
-                <TableHead>权重</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>操作</TableHead>
               </TableRow>
@@ -208,9 +202,6 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
                   </TableCell>
                   <TableCell>
                     <span className="font-semibold">{dimension.maxScore}分</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="font-semibold">{dimension.weight}%</span>
                   </TableCell>
                   <TableCell>
                     <Badge variant={dimension.isActive ? "default" : "secondary"}>
@@ -269,29 +260,17 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
                 rows={3}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="maxScore">满分</Label>
-                <Input
-                  id="maxScore"
-                  type="number"
-                  value={formData.maxScore}
-                  onChange={(e) => setFormData({ ...formData, maxScore: Number.parseInt(e.target.value) || 0 })}
-                  min="1"
-                  max="100"
-                />
-              </div>
-              <div>
-                <Label htmlFor="weight">权重 (%)</Label>
-                <Input
-                  id="weight"
-                  type="number"
-                  value={formData.weight}
-                  onChange={(e) => setFormData({ ...formData, weight: Number.parseInt(e.target.value) || 0 })}
-                  min="1"
-                  max="100"
-                />
-              </div>
+            <div>
+              <Label htmlFor="maxScore">满分</Label>
+              <Input
+                id="maxScore"
+                type="number"
+                value={formData.maxScore}
+                onChange={(e) => setFormData({ ...formData, maxScore: Number.parseInt(e.target.value) || 0 })}
+                min="1"
+                max="100"
+                placeholder="建议设置使总分为100分"
+              />
             </div>
             <div className="flex items-center space-x-2">
               <Switch
@@ -340,29 +319,17 @@ export default function InterviewDimensions({ dimensions, onRefresh }: Interview
                 rows={3}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="edit-maxScore">满分</Label>
-                <Input
-                  id="edit-maxScore"
-                  type="number"
-                  value={formData.maxScore}
-                  onChange={(e) => setFormData({ ...formData, maxScore: Number.parseInt(e.target.value) || 0 })}
-                  min="1"
-                  max="100"
-                />
-              </div>
-              <div>
-                <Label htmlFor="edit-weight">权重 (%)</Label>
-                <Input
-                  id="edit-weight"
-                  type="number"
-                  value={formData.weight}
-                  onChange={(e) => setFormData({ ...formData, weight: Number.parseInt(e.target.value) || 0 })}
-                  min="1"
-                  max="100"
-                />
-              </div>
+            <div>
+              <Label htmlFor="edit-maxScore">满分</Label>
+              <Input
+                id="edit-maxScore"
+                type="number"
+                value={formData.maxScore}
+                onChange={(e) => setFormData({ ...formData, maxScore: Number.parseInt(e.target.value) || 0 })}
+                min="1"
+                max="100"
+                placeholder="建议设置使总分为100分"
+              />
             </div>
             <div className="flex items-center space-x-2">
               <Switch

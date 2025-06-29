@@ -8,11 +8,39 @@ import type {
   InterviewDimension,
   ScoreItem,
   Batch,
+  EnhancedBatch,
   Question,
   InterviewItem,
   DisplaySession,
 } from "@/types/scoring"
 
+// 扩展的数据库结构，支持批次管理
+export interface EnhancedDatabaseData {
+  // 全局系统配置
+  systemConfig: {
+    activeBatchId?: string
+    defaultSettings: {
+      maxScore: number
+      precision: "integer" | "decimal"
+      calculationMethod: "weighted" | "average"
+      autoRefresh: boolean
+      refreshInterval: number
+    }
+  }
+
+  // 批次数据（使用增强的批次结构）
+  batches: EnhancedBatch[]
+
+  // 系统元数据
+  metadata: {
+    version: string
+    lastUpdated: number
+    backupCount: number
+    migrationVersion?: number
+  }
+}
+
+// 保持向后兼容的原始数据库结构
 export interface DatabaseData {
   candidates: Candidate[]
   judges: Judge[]
@@ -33,6 +61,7 @@ export interface DatabaseData {
 
 class Database {
   private dataFile: string
+  private enhancedDataFile: string
   private backupDir: string
   private isInitialized = false
 
@@ -40,8 +69,9 @@ class Database {
     // 使用项目根目录的data文件夹
     const projectRoot = process.cwd()
     this.dataFile = path.join(projectRoot, 'data', 'scoring-data.json')
+    this.enhancedDataFile = path.join(projectRoot, 'data', 'enhanced-scoring-data.json')
     this.backupDir = path.join(projectRoot, 'data', 'backups')
-    
+
     // 确保数据目录存在
     this.ensureDirectories()
   }
@@ -371,7 +401,6 @@ class Database {
           name: "专业能力",
           description: "专业知识掌握程度和实际应用能力",
           maxScore: 25,
-          weight: 25,
           order: 1,
           isActive: true,
         },
@@ -380,7 +409,6 @@ class Database {
           name: "沟通表达",
           description: "语言表达清晰度和沟通技巧",
           maxScore: 20,
-          weight: 20,
           order: 2,
           isActive: true,
         },
@@ -389,7 +417,6 @@ class Database {
           name: "领导能力",
           description: "团队管理和决策能力",
           maxScore: 25,
-          weight: 25,
           order: 3,
           isActive: true,
         },
@@ -398,7 +425,6 @@ class Database {
           name: "应急处理",
           description: "突发情况的应对和处理能力",
           maxScore: 15,
-          weight: 15,
           order: 4,
           isActive: true,
         },
@@ -407,7 +433,6 @@ class Database {
           name: "综合素质",
           description: "整体素养和职业形象",
           maxScore: 15,
-          weight: 15,
           order: 5,
           isActive: true,
         },
@@ -578,6 +603,218 @@ class Database {
         lastModified: null,
         backupCount: 0
       }
+    }
+  }
+
+  // ==================== 增强数据处理方法 ====================
+
+  // 初始化增强数据结构
+  async initializeEnhanced(): Promise<EnhancedDatabaseData> {
+    try {
+      if (fs.existsSync(this.enhancedDataFile)) {
+        console.log('[Database] Loading existing enhanced data from file')
+        const data = this.loadEnhanced()
+        return data
+      } else {
+        console.log('[Database] Creating new enhanced database')
+
+        // 检查是否需要从旧数据迁移
+        const legacyData = await this.checkLegacyDataMigration()
+        if (legacyData) {
+          console.log('[Database] Migrating legacy data to enhanced format')
+          await this.saveEnhanced(legacyData)
+          return legacyData
+        }
+
+        // 创建全新的增强数据
+        const defaultData = this.createDefaultEnhancedData()
+        await this.saveEnhanced(defaultData)
+        return defaultData
+      }
+    } catch (error) {
+      console.error('[Database] Error during enhanced initialization:', error)
+      // 如果加载失败，返回默认数据
+      const defaultData = this.createDefaultEnhancedData()
+      return defaultData
+    }
+  }
+
+  // 加载增强数据
+  loadEnhanced(): EnhancedDatabaseData {
+    try {
+      const data = fs.readFileSync(this.enhancedDataFile, 'utf8')
+      const parsed = JSON.parse(data) as EnhancedDatabaseData
+
+      // 验证数据结构
+      if (!this.validateEnhancedData(parsed)) {
+        throw new Error('Invalid enhanced data structure')
+      }
+
+      console.log(`[Database] Loaded enhanced data with ${parsed.batches.length} batches`)
+      return parsed
+    } catch (error) {
+      console.error('[Database] Error loading enhanced data:', error)
+      throw error
+    }
+  }
+
+  // 保存增强数据
+  async saveEnhanced(data: EnhancedDatabaseData): Promise<void> {
+    try {
+      // 更新时间戳
+      data.metadata.lastUpdated = Date.now()
+
+      // 创建备份
+      if (fs.existsSync(this.enhancedDataFile)) {
+        await this.createEnhancedBackup()
+      }
+
+      // 保存数据
+      const jsonData = JSON.stringify(data, null, 2)
+      fs.writeFileSync(this.enhancedDataFile, jsonData, 'utf8')
+
+      console.log('[Database] Enhanced data saved successfully')
+    } catch (error) {
+      console.error('[Database] Error saving enhanced data:', error)
+      throw error
+    }
+  }
+
+  // 创建默认增强数据
+  private createDefaultEnhancedData(): EnhancedDatabaseData {
+    return {
+      systemConfig: {
+        defaultSettings: {
+          maxScore: 100,
+          precision: "integer",
+          calculationMethod: "weighted",
+          autoRefresh: true,
+          refreshInterval: 5000,
+        }
+      },
+      batches: [],
+      metadata: {
+        version: "2.0.0",
+        lastUpdated: Date.now(),
+        backupCount: 0,
+        migrationVersion: 1
+      }
+    }
+  }
+
+  // 验证增强数据结构
+  private validateEnhancedData(data: any): data is EnhancedDatabaseData {
+    return (
+      data &&
+      typeof data === 'object' &&
+      data.systemConfig &&
+      Array.isArray(data.batches) &&
+      data.metadata &&
+      typeof data.metadata.version === 'string'
+    )
+  }
+
+  // 检查是否需要从旧数据迁移
+  private async checkLegacyDataMigration(): Promise<EnhancedDatabaseData | null> {
+    try {
+      if (!fs.existsSync(this.dataFile)) {
+        return null
+      }
+
+      console.log('[Database] Found legacy data, preparing migration...')
+      const legacyData = this.load()
+
+      // 创建包装旧数据的增强批次
+      const migrationBatch: EnhancedBatch = {
+        id: 'legacy-batch-' + Date.now(),
+        name: '历史数据批次',
+        description: '系统升级前的数据自动迁移',
+        status: 'active',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        lastActiveAt: Date.now(),
+        config: {
+          judges: legacyData.judges.map(({ id, ...judge }) => judge),
+          dimensions: legacyData.interviewDimensions.map(({ id, ...dimension }) => dimension),
+          scoreItems: legacyData.scoreItems.map(({ id, ...item }) => item),
+          interviewItems: legacyData.interviewItems?.map(({ id, ...item }) => item) || [],
+          systemSettings: {
+            maxScore: 100,
+            precision: "integer",
+            calculationMethod: "weighted",
+            autoRefresh: true,
+            refreshInterval: 5000,
+          }
+        },
+        runtime: {
+          candidates: legacyData.candidates || [],
+          currentCandidateId: legacyData.currentCandidateId || undefined,
+          currentRound: legacyData.currentRound || 1,
+          displaySession: legacyData.displaySession,
+          currentStage: legacyData.displaySession?.currentStage || "opening",
+          totalScores: this.calculateTotalScores(legacyData.candidates || []),
+          metadata: {
+            totalCandidates: (legacyData.candidates || []).length,
+            completedCandidates: (legacyData.candidates || []).filter(c => c.status === 'completed').length,
+            averageScore: this.calculateAverageScore(legacyData.candidates || []),
+            lastUpdated: Date.now()
+          }
+        }
+      }
+
+      const enhancedData: EnhancedDatabaseData = {
+        systemConfig: {
+          activeBatchId: migrationBatch.id,
+          defaultSettings: {
+            maxScore: 100,
+            precision: "integer",
+            calculationMethod: "weighted",
+            autoRefresh: true,
+            refreshInterval: 5000,
+          }
+        },
+        batches: [migrationBatch],
+        metadata: {
+          version: "2.0.0",
+          lastUpdated: Date.now(),
+          backupCount: 0,
+          migrationVersion: 1
+        }
+      }
+
+      return enhancedData
+    } catch (error) {
+      console.error('[Database] Error during legacy data migration:', error)
+      return null
+    }
+  }
+
+  // 计算总分数
+  private calculateTotalScores(candidates: Candidate[]): number {
+    return candidates.reduce((total, candidate) => total + (candidate.totalScore || 0), 0)
+  }
+
+  // 计算平均分
+  private calculateAverageScore(candidates: Candidate[]): number {
+    if (candidates.length === 0) return 0
+    const totalScore = this.calculateTotalScores(candidates)
+    return Math.round((totalScore / candidates.length) * 100) / 100
+  }
+
+  // 创建增强数据备份
+  private async createEnhancedBackup(): Promise<string> {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const backupName = `enhanced-backup-${timestamp}.json`
+      const backupPath = path.join(this.backupDir, backupName)
+
+      fs.copyFileSync(this.enhancedDataFile, backupPath)
+      console.log(`[Database] Enhanced backup created: ${backupName}`)
+
+      return backupName
+    } catch (error) {
+      console.error('[Database] Error creating enhanced backup:', error)
+      throw error
     }
   }
 }

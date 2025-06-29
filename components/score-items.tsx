@@ -32,19 +32,15 @@ import type { ScoreItem, Candidate } from "@/types/scoring"
 
 interface ScoreItemsProps {
   scoreItems: ScoreItem[]
-  candidates: Candidate[]
   onRefresh: () => void
 }
 
-export default function ScoreItems({ scoreItems, candidates, onRefresh }: ScoreItemsProps) {
+export default function ScoreItems({ scoreItems, onRefresh }: ScoreItemsProps) {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [showScoreDialog, setShowScoreDialog] = useState(false)
   const [editingItem, setEditingItem] = useState<ScoreItem | null>(null)
   const [deletingItem, setDeletingItem] = useState<ScoreItem | null>(null)
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null)
-  const [selectedItem, setSelectedItem] = useState<ScoreItem | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -53,7 +49,6 @@ export default function ScoreItems({ scoreItems, candidates, onRefresh }: ScoreI
     order: 1,
     isActive: true,
   })
-  const [scoreValue, setScoreValue] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const resetForm = () => {
@@ -135,30 +130,7 @@ export default function ScoreItems({ scoreItems, candidates, onRefresh }: ScoreI
     }
   }
 
-  const handleUpdateScore = async () => {
-    if (!selectedCandidate || !selectedItem) return
 
-    setIsSubmitting(true)
-    try {
-      const response = await fetch(`/api/admin/candidates/${selectedCandidate.id}/other-score`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemId: selectedItem.id, score: scoreValue }),
-      })
-
-      if (response.ok) {
-        setShowScoreDialog(false)
-        setSelectedCandidate(null)
-        setSelectedItem(null)
-        setScoreValue(0)
-        onRefresh()
-      }
-    } catch (error) {
-      console.error("更新成绩失败:", error)
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
 
   const openEditDialog = (item: ScoreItem) => {
     setEditingItem(item)
@@ -178,20 +150,7 @@ export default function ScoreItems({ scoreItems, candidates, onRefresh }: ScoreI
     setShowDeleteDialog(true)
   }
 
-  const openScoreDialog = (candidate: Candidate, item: ScoreItem) => {
-    setSelectedCandidate(candidate)
-    setSelectedItem(item)
-    const existingScore = candidate.otherScores.find((s) => s.itemId === item.id)
-    setScoreValue(existingScore ? existingScore.score : 0)
-    setShowScoreDialog(true)
-  }
-
   const totalWeight = scoreItems.filter((item) => item.isActive).reduce((sum, item) => sum + item.weight, 0)
-
-  const getCandidateScore = (candidate: Candidate, itemId: string) => {
-    const score = candidate.otherScores.find((s) => s.itemId === itemId)
-    return score ? score.score : 0
-  }
 
   return (
     <div className="space-y-6">
@@ -277,61 +236,7 @@ export default function ScoreItems({ scoreItems, candidates, onRefresh }: ScoreI
         </CardContent>
       </Card>
 
-      {/* 候选人成绩录入 */}
-      {scoreItems.length > 0 && candidates.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>候选人成绩录入</CardTitle>
-            <CardDescription>为候选人录入各项成绩（面试成绩自动计算）</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>候选人</TableHead>
-                    {scoreItems
-                      .filter((item) => item.isActive && item.name !== "面试成绩")
-                      .map((item) => (
-                        <TableHead key={item.id}>{item.name}</TableHead>
-                      ))}
-                    <TableHead>最终得分</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {candidates.slice(0, 10).map((candidate) => (
-                    <TableRow key={candidate.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{candidate.name}</div>
-                          <div className="text-sm text-gray-500">{candidate.number}</div>
-                        </div>
-                      </TableCell>
-                      {scoreItems
-                        .filter((item) => item.isActive && item.name !== "面试成绩")
-                        .map((item) => (
-                          <TableCell key={item.id}>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openScoreDialog(candidate, item)}
-                              className="w-16"
-                            >
-                              {getCandidateScore(candidate, item.id) || "-"}
-                            </Button>
-                          </TableCell>
-                        ))}
-                      <TableCell>
-                        <span className="text-lg font-bold text-blue-600">{candidate.finalScore}</span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+
 
       {/* 添加项目对话框 */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
@@ -497,42 +402,7 @@ export default function ScoreItems({ scoreItems, candidates, onRefresh }: ScoreI
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 成绩录入对话框 */}
-      <Dialog open={showScoreDialog} onOpenChange={setShowScoreDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>录入成绩</DialogTitle>
-            <DialogDescription>
-              为 <strong>{selectedCandidate?.name}</strong> 录入 <strong>{selectedItem?.name}</strong>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="score">成绩分数</Label>
-              <Input
-                id="score"
-                type="number"
-                value={scoreValue}
-                onChange={(e) => setScoreValue(Number.parseFloat(e.target.value) || 0)}
-                min="0"
-                max={selectedItem?.maxScore || 100}
-                placeholder={`请输入分数（满分${selectedItem?.maxScore}）`}
-              />
-            </div>
-            <div className="text-sm text-gray-500">
-              满分：{selectedItem?.maxScore}分 | 权重：{selectedItem?.weight}%
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowScoreDialog(false)}>
-              取消
-            </Button>
-            <Button onClick={handleUpdateScore} disabled={isSubmitting}>
-              {isSubmitting ? "保存中..." : "保存"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
     </div>
   )
 }

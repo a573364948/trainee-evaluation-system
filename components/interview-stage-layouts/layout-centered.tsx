@@ -110,23 +110,43 @@ export function LayoutCentered({
           </div>
 
           {/* 计时器 - 突出显示 */}
-          {currentItem.timeLimit && (
-            <div className="bg-gradient-to-r from-orange-600/20 to-red-600/20 backdrop-blur-sm border border-orange-500/30 rounded-2xl p-8">
-              <div className="flex items-center justify-center gap-8">
-                <Clock className="w-12 h-12 text-orange-400" />
-                <div className="text-center">
-                  <div className="text-6xl font-bold text-orange-400 mb-2">
-                    {formatTime(timeRemaining)}
+          {currentItem.timeLimit && (() => {
+            const isWarning = timeRemaining <= 30000 && timeRemaining > 0 // 30秒警告
+            const isCritical = timeRemaining <= 10000 && timeRemaining > 0 // 10秒危险
+
+            return (
+              <div className={`backdrop-blur-sm rounded-2xl p-8 transition-all duration-1000 ${
+                isCritical
+                  ? 'bg-gradient-to-r from-red-700/30 to-red-800/30 border border-red-500/50'
+                  : isWarning
+                  ? 'bg-gradient-to-r from-orange-600/25 to-red-600/25 border border-orange-500/40'
+                  : 'bg-gradient-to-r from-orange-600/20 to-red-600/20 border border-orange-500/30'
+              }`}>
+                <div className="flex items-center justify-center gap-8">
+                  <Clock className={`w-12 h-12 transition-colors duration-1000 ${
+                    isCritical ? 'text-red-400' : 'text-orange-400'
+                  }`} />
+                  <div className="text-center">
+                    <div className={`text-6xl font-bold mb-2 transition-colors duration-1000 ${
+                      isCritical ? 'text-red-400' : 'text-orange-400'
+                    }`}>
+                      {formatTime(timeRemaining)}
+                    </div>
+                    <div className={`text-lg transition-colors duration-1000 ${
+                      isCritical ? 'text-red-200' : 'text-orange-200'
+                    }`}>剩余时间</div>
+                    <Progress
+                      value={(() => {
+                        const totalTime = currentItem.timeLimit * 1000
+                        return totalTime > 0 ? Math.max(0, Math.min(100, (timeRemaining / totalTime) * 100)) : 0
+                      })()}
+                      className="w-64 h-3 mt-4"
+                    />
                   </div>
-                  <div className="text-orange-200 text-lg">剩余时间</div>
-                  <Progress
-                    value={(timeRemaining / (currentItem.timeLimit * 1000)) * 100}
-                    className="w-64 h-3 mt-4"
-                  />
                 </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
       </div>
 
@@ -136,7 +156,7 @@ export function LayoutCentered({
           <div className="flex items-center gap-6">
             <Users className="w-5 h-5 text-gray-400" />
             <span className="text-gray-300">
-              在线评委：{judges.filter(j => j.isActive).length} / {judges.length}
+              在线评委：{judges.filter(j => j.isActive).length}位
             </span>
             <div className="flex gap-2">
               {judges.filter(j => j.isActive).map((judge, index) => (

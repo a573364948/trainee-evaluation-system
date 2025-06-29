@@ -34,7 +34,8 @@ export function TimerControl({ timerState, onTimerAction }: TimerControlProps) {
 
   // 格式化时间显示
   const formatTime = (milliseconds: number) => {
-    const totalSeconds = Math.ceil(milliseconds / 1000)
+    // 确保负数和0都显示为00:00
+    const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000))
     const minutes = Math.floor(totalSeconds / 60)
     const seconds = totalSeconds % 60
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
@@ -52,104 +53,86 @@ export function TimerControl({ timerState, onTimerAction }: TimerControlProps) {
 
   if (!timerState) {
     return (
-      <Card className="w-full">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Clock className="w-4 h-4" />
-            倒计时控制
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center text-gray-500 py-4">
-            当前环节无时间限制
-          </div>
-        </CardContent>
-      </Card>
+      <div className="bg-gray-50 rounded-lg border p-3">
+        <div className="flex items-center gap-2 text-gray-500">
+          <Clock className="w-4 h-4" />
+          <span className="text-sm">当前环节无时间限制</span>
+        </div>
+      </div>
     )
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Clock className="w-4 h-4" />
-          倒计时控制
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* 时间显示 */}
-        <div className="text-center">
-          <div className="text-3xl font-bold text-blue-600 mb-1">
+    <div className="bg-white rounded-lg border p-3 space-y-3">
+      {/* 标题和时间显示 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-gray-600" />
+          <span className="text-sm font-medium text-gray-700">倒计时</span>
+        </div>
+        <div className="text-right">
+          <div className="text-lg font-bold text-blue-600">
             {formatTime(currentTime)}
           </div>
-          <div className="text-sm text-gray-500">
-            总时长: {formatTime(timerState.totalTime)}
-          </div>
-          <Badge variant={statusInfo.color as any} className="mt-2">
+          <Badge variant={statusInfo.color as any} className="text-xs">
             {statusInfo.text}
           </Badge>
         </div>
+      </div>
 
-        {/* 进度条 */}
-        <div className="w-full bg-gray-200 rounded-full h-2">
-          <div 
-            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-            style={{ 
-              width: `${Math.max(0, (currentTime / timerState.totalTime) * 100)}%` 
-            }}
-          />
-        </div>
+      {/* 进度条 */}
+      <div className="w-full bg-gray-200 rounded-full h-1.5">
+        <div
+          className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+          style={{
+            width: `${Math.max(0, (currentTime / timerState.totalTime) * 100)}%`
+          }}
+        />
+      </div>
 
-        {/* 控制按钮 */}
-        <div className="flex gap-2">
-          {!timerState.isRunning ? (
-            <Button
-              onClick={() => onTimerAction(timerState.isPaused ? 'resume' : 'start')}
-              className="flex-1"
-              size="sm"
-            >
-              <Play className="w-4 h-4 mr-1" />
-              {timerState.isPaused ? '继续' : '开始'}
-            </Button>
-          ) : (
-            <Button
-              onClick={() => onTimerAction('pause')}
-              variant="outline"
-              className="flex-1"
-              size="sm"
-            >
-              <Pause className="w-4 h-4 mr-1" />
-              暂停
-            </Button>
-          )}
-          
+      {/* 控制按钮 - 紧凑布局 */}
+      <div className="flex gap-1">
+        {!timerState.isRunning ? (
           <Button
-            onClick={() => onTimerAction('reset')}
+            onClick={() => onTimerAction(timerState.isPaused ? 'resume' : 'start')}
+            size="sm"
+            className="flex-1 h-8 text-xs"
+          >
+            <Play className="w-3 h-3 mr-1" />
+            {timerState.isPaused ? '继续' : '开始'}
+          </Button>
+        ) : (
+          <Button
+            onClick={() => onTimerAction('pause')}
             variant="outline"
             size="sm"
+            className="flex-1 h-8 text-xs"
           >
-            <RotateCcw className="w-4 h-4" />
+            <Pause className="w-3 h-3 mr-1" />
+            暂停
           </Button>
-        </div>
+        )}
 
-        {/* 快速设置 */}
-        <div className="border-t pt-3">
-          <div className="text-xs text-gray-500 mb-2">快速设置:</div>
-          <div className="grid grid-cols-4 gap-1">
-            {[5, 10, 15, 30].map((minutes) => (
-              <Button
-                key={minutes}
-                onClick={() => onTimerAction('setDuration', minutes * 60)}
-                variant="outline"
-                size="sm"
-                className="text-xs"
-              >
-                {minutes}分
-              </Button>
-            ))}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+        <Button
+          onClick={() => onTimerAction('reset')}
+          variant="outline"
+          size="sm"
+          className="h-8 px-2"
+          title="重置计时"
+        >
+          <RotateCcw className="w-3 h-3" />
+        </Button>
+
+        <Button
+          onClick={() => onTimerAction('setToZero')}
+          variant="outline"
+          size="sm"
+          className="h-8 px-2"
+          title="倒计时归零"
+        >
+          <span className="text-xs font-mono">00</span>
+        </Button>
+      </div>
+    </div>
   )
 }

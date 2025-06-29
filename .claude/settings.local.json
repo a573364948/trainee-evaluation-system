@@ -9,7 +9,13 @@
       "Bash(curl:*)",
       "Bash(ss:*)",
       "Bash(pkill:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm:*)",
+      "Bash(npx pnpm:*)",
+      "Bash(find:*)",
+      "Bash(true)"
     ],
     "deny": []
   }

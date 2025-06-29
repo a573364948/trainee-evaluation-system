@@ -24,31 +24,30 @@ export default function JudgeLoginPage() {
     setIsLoading(true)
 
     try {
-      // 获取所有评委信息
-      const response = await fetch("/api/admin/judges")
-      const data = await response.json()
-      
+      // 使用新的认证API
+      const response = await fetch("/api/judge/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          judgeName: formData.name,
+          password: formData.password
+        })
+      })
+
       if (response.ok) {
-        const judge = data.judges.find(
-          (j: any) => j.name === formData.name && j.password === formData.password
-        )
-        
-        if (judge) {
-          if (!judge.isActive) {
-            setError("您的账户已被禁用，请联系管理员")
-            return
-          }
-          
+        const data = await response.json()
+        if (data.success) {
           // 登录成功，存储评委信息到 localStorage
-          localStorage.setItem("currentJudge", JSON.stringify(judge))
-          
+          localStorage.setItem("currentJudge", JSON.stringify(data.judge))
+
           // 跳转到评分页面
-          router.push("/score")
+          router.push("/judge")
         } else {
-          setError("评委姓名或密码错误")
+          setError(data.error || "认证失败")
         }
       } else {
-        setError("登录失败，请重试")
+        const errorText = await response.text()
+        setError(errorText || "认证失败，请重试")
       }
     } catch (error) {
       console.error("登录错误:", error)

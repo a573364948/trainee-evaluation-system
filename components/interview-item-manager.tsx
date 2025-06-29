@@ -275,9 +275,20 @@ export default function InterviewItemManager({
       order: index
     }))
 
-    console.log("保存面试项目，排序后的数据:", sortedItems)
-    onSave(sortedItems)
-    onOpenChange(false)
+    console.log("[InterviewItemManager] 保存面试项目，排序后的数据:", sortedItems)
+    console.log("[InterviewItemManager] 详细数据检查:")
+    sortedItems.forEach((item, index) => {
+      console.log(`  项目${index + 1}: ${item.title} - 时间限制: ${item.timeLimit}秒`)
+    })
+
+    console.log("[InterviewItemManager] 开始调用 onSave...")
+    try {
+      onSave(sortedItems)
+      console.log("[InterviewItemManager] onSave 调用完成")
+      onOpenChange(false)
+    } catch (error) {
+      console.error("[InterviewItemManager] onSave 调用失败:", error)
+    }
   }
 
   return (
@@ -424,6 +435,28 @@ export default function InterviewItemManager({
                       <GripVertical className="w-4 h-4" />
                     </div>
                     
+                    {/* 编号标识 */}
+                    <div className={`w-12 h-12 rounded-lg flex flex-col items-center justify-center text-xs font-bold ${
+                      item.type === 'interview_stage'
+                        ? 'bg-purple-100 text-purple-700 border-2 border-purple-200'
+                        : 'bg-blue-100 text-blue-700 border-2 border-blue-200'
+                    }`}>
+                      <div className="text-[10px] leading-none">
+                        {item.type === 'interview_stage' ? '环节' : '题目'}
+                      </div>
+                      <div className="text-sm font-bold leading-none mt-0.5">
+                        {(() => {
+                          if (item.type === 'interview_stage') {
+                            const stageItems = localItems.filter(i => i.type === 'interview_stage').sort((a, b) => a.order - b.order)
+                            return stageItems.findIndex(i => i.id === item.id) + 1
+                          } else {
+                            const questionItems = localItems.filter(i => i.type === 'question').sort((a, b) => a.order - b.order)
+                            return questionItems.findIndex(i => i.id === item.id) + 1
+                          }
+                        })()}
+                      </div>
+                    </div>
+
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         {item.type === 'interview_stage' ? (
@@ -434,27 +467,34 @@ export default function InterviewItemManager({
                         <span className="font-medium truncate">
                           {item.title}
                         </span>
+                        <Badge
+                          variant={item.type === 'interview_stage' ? 'secondary' : 'default'}
+                          className="text-xs"
+                        >
+                          {item.type === 'interview_stage' ? '面试环节' : '题目'}
+                        </Badge>
                         {!item.isActive && (
-                          <Badge variant="secondary" className="text-xs">
+                          <Badge variant="secondary" className="text-xs bg-gray-100">
                             已禁用
                           </Badge>
                         )}
                       </div>
-                      
+
                       {item.subtitle && (
                         <div className="text-sm text-gray-600 mb-1">
                           {item.subtitle}
                         </div>
                       )}
-                      
+
                       <div className="flex items-center gap-4 text-xs text-gray-500">
                         <div className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
                           {formatTime(item.timeLimit)}
                         </div>
-                        <Badge variant="outline" className="text-xs">
-                          {item.type === 'interview_stage' ? '面试环节' : '题目'}
-                        </Badge>
+                        <div className="flex items-center gap-1">
+                          <span>执行顺序:</span>
+                          <span className="font-medium">{item.order + 1}</span>
+                        </div>
                       </div>
                     </div>
 
@@ -603,9 +643,11 @@ export default function InterviewItemManager({
                         value={editingItem.timeLimit ? Math.floor(editingItem.timeLimit / 60) : ''}
                         onChange={(e) => {
                           const minutes = parseInt(e.target.value) || 0
-                          setEditingItem({ 
-                            ...editingItem, 
-                            timeLimit: minutes > 0 ? minutes * 60 : null 
+                          const timeLimit = minutes > 0 ? minutes * 60 : null
+                          console.log(`[编辑] 时间限制更改: ${minutes}分钟 = ${timeLimit}秒`)
+                          setEditingItem({
+                            ...editingItem,
+                            timeLimit
                           })
                         }}
                         disabled={!isEditing || editingItem.timeLimit === null}

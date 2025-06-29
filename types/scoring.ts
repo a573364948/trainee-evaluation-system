@@ -32,7 +32,6 @@ export interface InterviewDimension {
   name: string
   description: string
   maxScore: number
-  weight: number // 在面试总分中的权重百分比
   order: number
   isActive: boolean
 }
@@ -54,6 +53,65 @@ export interface OtherScore {
   timestamp: number
 }
 
+// 批次状态枚举
+export type BatchStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived'
+
+// 增强的批次接口
+export interface EnhancedBatch {
+  // 基础信息
+  id: string
+  name: string
+  description: string
+  status: BatchStatus
+
+  // 时间戳
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  pausedAt?: number
+  completedAt?: number
+  lastActiveAt: number
+
+  // 批次配置（静态）
+  config: {
+    judges: Omit<Judge, "id">[]
+    dimensions: Omit<InterviewDimension, "id">[]
+    scoreItems: Omit<ScoreItem, "id">[]
+    interviewItems: Omit<InterviewItem, "id">[]
+    systemSettings: {
+      maxScore: number
+      precision: "integer" | "decimal"
+      calculationMethod: "weighted" | "average"
+      autoRefresh: boolean
+      refreshInterval: number
+    }
+  }
+
+  // 批次运行时数据（动态）
+  runtime: {
+    // 候选人数据
+    candidates: Candidate[]
+    currentCandidateId?: string
+    currentRound: number
+
+    // 面试状态
+    displaySession: DisplaySession
+    currentStage: "opening" | "interviewing" | "scoring"
+
+    // 评分数据（从candidates中提取的汇总）
+    totalScores: number
+
+    // 系统状态元数据
+    metadata: {
+      totalCandidates: number
+      completedCandidates: number
+      averageScore: number
+      lastUpdated: number
+    }
+  }
+}
+
+// 保持向后兼容的原始Batch接口
 export interface Batch {
   id: string
   name: string
@@ -86,7 +144,7 @@ export interface TimerState {
 
 export interface DisplaySession {
   id: string
-  currentStage: "opening" | "questioning" | "scoring"
+  currentStage: "opening" | "interviewing" | "scoring"
   currentQuestion?: {
     id: string
     title: string

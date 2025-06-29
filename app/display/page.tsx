@@ -4,14 +4,21 @@ import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Search, User, Clock, Play, MessageSquare, Award, ArrowRight, RotateCcw } from "lucide-react"
-import type { Candidate, Judge, InterviewDimension, ScoreItem, DisplaySession, Question } from "@/types/scoring"
+import { Search, User, Clock, Play, MessageSquare, Award, ArrowRight, RotateCcw, Wifi, WifiOff } from "lucide-react"
+import type { Candidate, Judge, InterviewDimension, ScoreItem, DisplaySession, Question, ScoringEvent } from "@/types/scoring"
 import { LayoutCentered } from "@/components/interview-stage-layouts/layout-centered"
 import { LayoutMinimal } from "@/components/interview-stage-layouts/layout-minimal"
 import { LayoutTransition } from "@/components/layout-transition"
 import { TimerWarningOverlay } from "@/components/timer-warning-overlay"
+import { useWebSocket } from "@/hooks/useWebSocket"
 
 export default function DisplayPage() {
+  // WebSocket连接
+  const { isConnected, sendEvent, onScoringEvent } = useWebSocket({
+    clientType: 'display',
+    autoConnect: true
+  })
+
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [judges, setJudges] = useState<Judge[]>([])
   const [dimensions, setDimensions] = useState<InterviewDimension[]>([])
@@ -54,120 +61,177 @@ export default function DisplayPage() {
       setDisplaySession(sessionData.session)
     })
 
-    // 监听实时更新 - 改进的 SSE 连接
-    let eventSource: EventSource | null = null
-    let reconnectTimer: NodeJS.Timeout | null = null
-    let connectionCheckTimer: NodeJS.Timeout | null = null
-    let lastHeartbeat = Date.now()
+    return () => {
+      clearInterval(timer)
+    }
+  }, [])
 
-    const connectSSE = () => {
-      if (eventSource) {
-        eventSource.close()
-      }
+  // WebSocket连接建立后重新同步状态
+  useEffect(() => {
+    if (isConnected) {
+      console.log("[Display] WebSocket connected, syncing current state...")
+      // 重新获取当前状态以确保同步
+      Promise.all([
+        fetch("/api/score").then((res) => res.json()),
+        fetch("/api/admin/display/stage").then((res) => res.json()),
+      ]).then(([scoreData, sessionData]) => {
+        setCandidates(scoreData.candidates)
+        setJudges(scoreData.judges)
+        setCurrentCandidate(scoreData.currentCandidate)
+        setDisplaySession(sessionData.session)
+        console.log("[Display] State synced:", sessionData.session)
+      }).catch(error => {
+        console.error("[Display] Failed to sync state:", error)
+      })
+    }
+  }, [isConnected])
 
-      console.log("[Display] Connecting to SSE...")
-      eventSource = new EventSource("/api/events")
+  // WebSocket事件处理
+  useEffect(() => {
+    if (isConnected) {
+      onScoringEvent((event: ScoringEvent) => {
+        console.log("[Display] Received WebSocket event:", event.type, event.data)
 
-      eventSource.onopen = () => {
-        console.log("[Display] SSE connection opened")
-      }
-
-      eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        console.log("[Display] Received event:", data.type, data)
-
-        if (data.type === "heartbeat") {
-          // 更新心跳时间
-          lastHeartbeat = Date.now()
-          console.log("[Display] Heartbeat received")
-          return
-        }
-
-        if (data.type === "initial") {
-          setCandidates(data.data.candidates)
-          setJudges(data.data.judges)
-          setCurrentCandidate(data.data.currentCandidate)
-          if (data.data.displaySession) {
-            setDisplaySession(data.data.displaySession)
-          }
-        } else if (data.type === "score_updated") {
-          setCandidates((prev) => prev.map((c) => (c.id === data.data.candidate.id ? data.data.candidate : c)))
-          if (data.data.candidate.id === currentCandidate?.id) {
-            setCurrentCandidate(data.data.candidate)
-          }
-        } else if (data.type === "candidate_changed") {
-          setCurrentCandidate(data.data)
-          setCandidates((prev) => prev.map((c) => (c.id === data.data.id ? data.data : c)))
-        } else if (data.type === "stage_changed") {
-          console.log("[Display] Stage changed to:", data.data.stage)
-
-          // 处理环节切换动画
-          const currentStage = displaySession?.currentStage
-          const newStage = data.data.stage
-
-          if (currentStage && currentStage !== newStage) {
-            setPreviousStage(currentStage)
-            setIsTransitioning(true)
-
-            // 确定过渡文本
-            let transitionMessage = ""
-            if (currentStage === "opening" && newStage === "questioning") {
-              transitionMessage = "进入答题环节"
-            } else if (currentStage === "questioning" && newStage === "scoring") {
-              transitionMessage = "进入评分环节"
-            } else if (currentStage === "scoring" && newStage === "opening") {
-              transitionMessage = "开始下一名面试人员"
-            } else if (currentStage === "opening" && newStage === "scoring") {
-              transitionMessage = "跳转到评分环节"
-            } else if (currentStage === "questioning" && newStage === "opening") {
-              transitionMessage = "返回开场环节"
-            } else if (currentStage === "scoring" && newStage === "questioning") {
-              transitionMessage = "返回答题环节"
-            } else {
-              transitionMessage = "环节切换中"
+        switch (event.type) {
+          case "score_updated":
+            setCandidates((prev) => prev.map((c) => (c.id === event.data.candidate.id ? event.data.candidate : c)))
+            if (event.data.candidate.id === currentCandidate?.id) {
+              setCurrentCandidate(event.data.candidate)
             }
+            break
 
-            setTransitionText(transitionMessage)
+          case "candidate_changed":
+            setCurrentCandidate(event.data)
+            setCandidates((prev) => prev.map((c) => (c.id === event.data.id ? event.data : c)))
+            break
 
-            // 2秒后完成过渡
-            setTimeout(() => {
-              setDisplaySession((prev) => (prev ? { ...prev, currentStage: newStage } : null))
+          case "dimension_changed":
+            // 重新获取最新的维度数据
+            fetch("/api/admin/dimensions").then((res) => res.json()).then((data) => {
+              setDimensions(data.dimensions)
+              console.log("[Display] Dimensions updated:", data.dimensions)
+            })
+            break
+
+          case "judge_changed":
+            // 重新获取最新的评委数据
+            fetch("/api/score").then((res) => res.json()).then((data) => {
+              setJudges(data.judges)
+              console.log("[Display] Judges updated:", data.judges)
+            })
+            break
+          case "stage_changed":
+            console.log("[Display] Stage changed to:", event.data.stage)
+
+            // 处理环节切换动画
+            const currentStage = displaySession?.currentStage
+            const newStage = event.data.stage
+
+            if (currentStage && currentStage !== newStage) {
+              setPreviousStage(currentStage)
+              setIsTransitioning(true)
+
+              // 确定过渡文本
+              let transitionMessage = ""
+              if (currentStage === "opening" && newStage === "interviewing") {
+                transitionMessage = "进入面试环节"
+              } else if (currentStage === "interviewing" && newStage === "scoring") {
+                transitionMessage = "进入评分环节"
+              } else if (currentStage === "scoring" && newStage === "opening") {
+                transitionMessage = "开始下一名面试人员"
+              } else if (currentStage === "opening" && newStage === "scoring") {
+                transitionMessage = "跳转到评分环节"
+              } else if (currentStage === "interviewing" && newStage === "opening") {
+                transitionMessage = "返回开场环节"
+              } else if (currentStage === "scoring" && newStage === "interviewing") {
+                transitionMessage = "返回面试环节"
+              } else {
+                transitionMessage = "环节切换中"
+              }
+
+              setTransitionText(transitionMessage)
+
+              // 2秒后完成过渡
+              setTimeout(() => {
+                // 使用完整的 displaySession 数据来确保状态同步
+                if (event.data.displaySession) {
+                  setDisplaySession(event.data.displaySession)
+                } else {
+                  // 向后兼容：如果只有 stage 数据
+                  setDisplaySession((prev) => (prev ? { ...prev, currentStage: newStage } : null))
+                }
+                setForceUpdate((prev) => prev + 1)
+
+                // 再过0.5秒隐藏过渡动画
+                setTimeout(() => {
+                  setIsTransitioning(false)
+                  setPreviousStage(null)
+                }, 500)
+              }, 2000)
+            } else {
+              // 直接切换（初始状态或相同环节）
+              // 使用完整的 displaySession 数据来确保状态同步
+              if (event.data.displaySession) {
+                setDisplaySession(event.data.displaySession)
+              } else {
+                // 向后兼容：如果只有 stage 数据
+                setDisplaySession((prev) => (prev ? { ...prev, currentStage: newStage } : null))
+              }
               setForceUpdate((prev) => prev + 1)
+            }
+            break
+          case "question_changed":
+            console.log("[Display] Question changed:", event.data)
+            setDisplaySession((prev) => (prev ? { ...prev, currentQuestion: event.data.question } : null))
+            setForceUpdate((prev) => prev + 1) // 强制重新渲染
+            break
+          case "interview_item_changed":
+            console.log("[Display] Interview item changed:", event.data)
 
-              // 再过0.5秒隐藏过渡动画
-              setTimeout(() => {
-                setIsTransitioning(false)
-                setPreviousStage(null)
-              }, 500)
-            }, 2000)
-          } else {
-            // 直接切换（初始状态或相同环节）
-            setDisplaySession((prev) => (prev ? { ...prev, currentStage: newStage } : null))
-            setForceUpdate((prev) => prev + 1)
-          }
-        } else if (data.type === "question_changed") {
-          console.log("[Display] Question changed:", data.data)
-          setDisplaySession((prev) => (prev ? { ...prev, currentQuestion: data.data } : null))
-          setForceUpdate((prev) => prev + 1) // 强制重新渲染
-        } else if (data.type === "interview_item_changed") {
-          console.log("[Display] Interview item changed:", data.data)
+            // 检查是否需要布局切换过渡
+            const newItem = event.data.item
+            const currentItem = displaySession?.currentInterviewItem || displaySession?.currentQuestion
 
-          // 检查是否需要布局切换过渡
-          const newItem = data.data.item
-          const currentItem = displaySession?.currentInterviewItem || displaySession?.currentQuestion
+            if (currentItem && newItem) {
+              const currentType = currentItem.type || 'question'
+              const newType = newItem.type
 
-          if (currentItem && newItem) {
-            const currentType = currentItem.type || 'question'
-            const newType = newItem.type
+              // 如果类型发生变化，触发过渡动画
+              if (currentType !== newType) {
+                setPreviousItem(currentItem)
+                setLayoutTransitionType(newType === 'interview_stage' ? 'to_interview_stage' : 'to_question')
+                setIsLayoutTransitioning(true)
 
-            // 如果类型发生变化，触发过渡动画
-            if (currentType !== newType) {
-              setPreviousItem(currentItem)
-              setLayoutTransitionType(newType === 'interview_stage' ? 'to_interview_stage' : 'to_question')
-              setIsLayoutTransitioning(true)
+                // 延迟更新显示会话，让过渡动画完成
+                setTimeout(() => {
+                  setDisplaySession((prev) => {
+                    if (!prev) return null
 
-              // 延迟更新显示会话，让过渡动画完成
-              setTimeout(() => {
+                    const updated = { ...prev, currentInterviewItem: newItem }
+
+                    // 如果是题目类型，也更新currentQuestion以保持兼容性
+                    if (newItem.type === 'question') {
+                      updated.currentQuestion = {
+                        id: newItem.id,
+                        title: newItem.title,
+                        content: newItem.content || '',
+                        timeLimit: newItem.timeLimit || 300,
+                        startTime: newItem.startTime
+                      }
+                    }
+
+                    return updated
+                  })
+                  setForceUpdate((prev) => prev + 1)
+
+                  // 确保过渡状态被重置（备用机制）
+                  setTimeout(() => {
+                    setIsLayoutTransitioning(false)
+                    setPreviousItem(null)
+                  }, 100)
+                }, 1200) // 与过渡动画时间匹配
+              } else {
+                // 同类型切换，直接更新
                 setDisplaySession((prev) => {
                   if (!prev) return null
 
@@ -187,9 +251,9 @@ export default function DisplayPage() {
                   return updated
                 })
                 setForceUpdate((prev) => prev + 1)
-              }, 1200) // 与过渡动画时间匹配
+              }
             } else {
-              // 同类型切换，直接更新
+              // 首次设置或无当前项目，直接更新
               setDisplaySession((prev) => {
                 if (!prev) return null
 
@@ -210,92 +274,30 @@ export default function DisplayPage() {
               })
               setForceUpdate((prev) => prev + 1)
             }
-          } else {
-            // 首次设置或无当前项目，直接更新
+            break
+
+          case "timer_changed":
+            console.log("[Display] Timer state changed:", event.data)
             setDisplaySession((prev) => {
               if (!prev) return null
-
-              const updated = { ...prev, currentInterviewItem: newItem }
-
-              // 如果是题目类型，也更新currentQuestion以保持兼容性
-              if (newItem.type === 'question') {
-                updated.currentQuestion = {
-                  id: newItem.id,
-                  title: newItem.title,
-                  content: newItem.content || '',
-                  timeLimit: newItem.timeLimit || 300,
-                  startTime: newItem.startTime
-                }
-              }
-
-              return updated
+              return { ...prev, timerState: event.data.timerState }
             })
             setForceUpdate((prev) => prev + 1)
-          }
-        } else if (data.type === "timer_changed") {
-          console.log("[Display] Timer state changed:", data.data)
-          setDisplaySession((prev) => {
-            if (!prev) return null
-            return { ...prev, timerState: data.data.timerState }
-          })
-          setForceUpdate((prev) => prev + 1)
-          return
+            break
+
+          default:
+            console.log("[Display] Unhandled WebSocket event type:", event.type)
         }
-      }
-
-      eventSource.onerror = (error) => {
-        console.error("[Display] SSE error:", error)
-        eventSource?.close()
-
-        // 自动重连
-        if (!reconnectTimer) {
-          reconnectTimer = setTimeout(() => {
-            console.log("[Display] Attempting to reconnect SSE...")
-            reconnectTimer = null
-            connectSSE()
-          }, 1000) // 缩短重连间隔到1秒
-        }
-      }
+      })
     }
-
-    // 连接状态检查机制
-    const checkConnection = () => {
-      const now = Date.now()
-      const timeSinceLastHeartbeat = now - lastHeartbeat
-
-      // 如果超过20秒没有收到心跳，主动重连
-      if (timeSinceLastHeartbeat > 20000) {
-        console.log(`[Display] No heartbeat for ${timeSinceLastHeartbeat}ms, reconnecting...`)
-        connectSSE()
-      }
-    }
-
-    // 初始连接
-    connectSSE()
-
-    // 每15秒检查一次连接状态
-    connectionCheckTimer = setInterval(checkConnection, 15000)
-
-    return () => {
-      clearInterval(timer)
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer)
-      }
-      if (connectionCheckTimer) {
-        clearInterval(connectionCheckTimer)
-      }
-      if (eventSource) {
-        eventSource.close()
-      }
-    }
-  }, []) // 移除依赖，避免因状态更新导致SSE连接重建
+  }, [isConnected, onScoringEvent, displaySession?.currentStage, displaySession?.currentInterviewItem, displaySession?.currentQuestion, currentCandidate?.id])
 
   // 计算答题剩余时间 - 支持手动倒计时控制
   useEffect(() => {
     const currentItem = displaySession?.currentInterviewItem || displaySession?.currentQuestion
     const timerState = displaySession?.timerState
 
-    if (currentItem && displaySession?.currentStage === "questioning") {
+    if (currentItem && displaySession?.currentStage === "interviewing") {
       const interval = setInterval(() => {
         if (timerState) {
           // 使用手动控制的倒计时状态
@@ -305,24 +307,35 @@ export default function DisplayPage() {
             setTimeRemaining(remaining)
           } else {
             // 暂停或停止状态，显示当前剩余时间
-            setTimeRemaining(timerState.remainingTime)
+            setTimeRemaining(Math.max(0, timerState.remainingTime))
           }
         } else {
           // 回退到自动计算（向后兼容）
-          const elapsed = Date.now() - currentItem.startTime
-          const timeLimit = currentItem.timeLimit || 0
-          const remaining = Math.max(0, timeLimit * 1000 - elapsed)
-          setTimeRemaining(remaining)
+          if (currentItem.startTime) {
+            const elapsed = Date.now() - currentItem.startTime
+            const timeLimit = currentItem.timeLimit || 0
+            const remaining = Math.max(0, timeLimit * 1000 - elapsed)
+            setTimeRemaining(remaining)
+          } else {
+            // 如果没有开始时间，显示完整时间
+            const timeLimit = currentItem.timeLimit || 0
+            setTimeRemaining(timeLimit * 1000)
+          }
         }
       }, 100) // 更频繁的更新以获得更平滑的显示
 
       return () => clearInterval(interval)
+    } else {
+      // 非答题环节时，重置倒计时显示
+      setTimeRemaining(0)
     }
   }, [displaySession?.currentInterviewItem, displaySession?.currentQuestion, displaySession?.currentStage, displaySession?.timerState])
 
   const formatTime = (ms: number) => {
-    const minutes = Math.floor(ms / 60000)
-    const seconds = Math.floor((ms % 60000) / 1000)
+    // 确保显示时间不会是负数，但保留原始值用于警告判断
+    const displayMs = Math.max(0, ms)
+    const minutes = Math.floor(displayMs / 60000)
+    const seconds = Math.floor((displayMs % 60000) / 1000)
     return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
   }
 
@@ -331,7 +344,7 @@ export default function DisplayPage() {
     switch (stage) {
       case "opening":
         return <Play className="h-12 w-12" />
-      case "questioning":
+      case "interviewing":
         return <MessageSquare className="h-12 w-12" />
       case "scoring":
         return <Award className="h-12 w-12" />
@@ -345,8 +358,8 @@ export default function DisplayPage() {
     switch (stage) {
       case "opening":
         return "开场环节"
-      case "questioning":
-        return "答题环节"
+      case "interviewing":
+        return "面试环节"
       case "scoring":
         return "评分环节"
       default:
@@ -428,7 +441,19 @@ export default function DisplayPage() {
 
   // 开场环节
   const renderOpeningStage = () => (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 text-white flex items-center justify-center">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 text-white flex items-center justify-center relative">
+      {/* WebSocket连接状态 */}
+      <div className="absolute top-4 right-4 flex items-center gap-2 bg-black/20 backdrop-blur-sm rounded-lg px-3 py-2">
+        {isConnected ? (
+          <Wifi className="h-4 w-4 text-green-400" />
+        ) : (
+          <WifiOff className="h-4 w-4 text-red-400" />
+        )}
+        <span className="text-sm text-white">
+          {isConnected ? "WebSocket已连接" : "WebSocket断开"}
+        </span>
+      </div>
+
       <div className="text-center max-w-4xl mx-auto px-8">
         <div className="mb-8">
           <div className="w-32 h-32 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-6 backdrop-blur-sm">
@@ -529,7 +554,20 @@ export default function DisplayPage() {
       {/* 左侧候选人信息 */}
       <div className="w-80 bg-[#2a2a2a] p-6 flex flex-col">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white mb-4">面试答题环节</h1>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold text-white">面试答题环节</h1>
+            {/* WebSocket连接状态 */}
+            <div className="flex items-center gap-2 bg-black/20 backdrop-blur-sm rounded-lg px-3 py-2">
+              {isConnected ? (
+                <Wifi className="h-4 w-4 text-green-400" />
+              ) : (
+                <WifiOff className="h-4 w-4 text-red-400" />
+              )}
+              <span className="text-xs text-white">
+                {isConnected ? "已连接" : "断开"}
+              </span>
+            </div>
+          </div>
           <div className="text-sm text-gray-400 mb-4">
             {currentTime.toLocaleDateString("zh-CN")} {currentTime.toLocaleTimeString("zh-CN")}
           </div>
@@ -600,7 +638,10 @@ export default function DisplayPage() {
                 <div className="text-gray-400">剩余时间</div>
                 <div className="mt-2">
                   <Progress
-                    value={(timeRemaining / (displaySession.currentQuestion.timeLimit * 1000)) * 100}
+                    value={(() => {
+                      const totalTime = displaySession?.timerState?.totalTime || (displaySession.currentQuestion.timeLimit * 1000)
+                      return totalTime > 0 ? Math.max(0, Math.min(100, (timeRemaining / totalTime) * 100)) : 0
+                    })()}
                     className="w-32 h-2"
                   />
                 </div>
@@ -697,8 +738,11 @@ export default function DisplayPage() {
 
   // 评分环节（原有的界面）
   const renderScoringStage = () => {
-    const sortedCandidates = [...candidates].sort((a, b) => b.finalScore - a.finalScore)
+    // 只显示已评分的候选人，并按分数排序
+    const scoredCandidates = candidates.filter(candidate => candidate.scores.length > 0)
+    const sortedCandidates = [...scoredCandidates].sort((a, b) => b.finalScore - a.finalScore)
     const activeDimensions = dimensions.filter((d) => d.isActive)
+    const activeJudges = judges.filter((j) => j.isActive)
 
     const getDimensionAverage = (dimensionId: string) => {
       if (!currentCandidate || currentCandidate.scores.length === 0) return 0
@@ -706,23 +750,42 @@ export default function DisplayPage() {
       return Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10
     }
 
+    // 判断候选人是否已评分
+    const isCandidateScored = (candidate: Candidate) => {
+      return candidate.scores.length > 0
+    }
+
     const getStatusBadge = (candidate: Candidate) => {
-      if (candidate.id === currentCandidate?.id) {
-        return <Badge className="bg-blue-500 text-white text-xs">已评分</Badge>
+      // 根据实际评分状态显示徽章
+      if (isCandidateScored(candidate)) {
+        return <Badge className="bg-green-500 text-white text-xs">已评分</Badge>
+      }
+      if (candidate.status === "interviewing") {
+        return <Badge className="bg-blue-500 text-white text-xs">面试中</Badge>
       }
       if (candidate.status === "completed") {
-        return <Badge className="bg-green-500 text-white text-xs">面试中</Badge>
+        return <Badge className="bg-orange-500 text-white text-xs">待评分</Badge>
       }
-      return <Badge className="bg-orange-500 text-white text-xs">待面试</Badge>
+      return <Badge className="bg-gray-500 text-white text-xs">待面试</Badge>
     }
 
     const formatCandidateNumber = (index: number) => {
       return String(index + 1).padStart(3, "0")
     }
 
-    const averageScore =
-      candidates.length > 0
-        ? Math.round((candidates.reduce((sum, c) => sum + c.finalScore, 0) / candidates.length) * 10) / 10
+    // 计算面试成绩统计（只统计面试分数，不是最终得分）
+    const interviewScores = scoredCandidates.map(c => c.totalScore).filter(score => score > 0)
+    const interviewStats = {
+      highest: interviewScores.length > 0 ? Math.max(...interviewScores) : 0,
+      lowest: interviewScores.length > 0 ? Math.min(...interviewScores) : 0,
+      average: interviewScores.length > 0 ? Math.round((interviewScores.reduce((sum, score) => sum + score, 0) / interviewScores.length) * 10) / 10 : 0,
+      count: interviewScores.length
+    }
+
+    // 最终得分平均分（用于排名显示）
+    const finalScoreAverage =
+      scoredCandidates.length > 0
+        ? Math.round((scoredCandidates.reduce((sum, c) => sum + c.finalScore, 0) / scoredCandidates.length) * 10) / 10
         : 0
 
     return (
@@ -730,10 +793,22 @@ export default function DisplayPage() {
         {/* 左侧候选人列表 */}
         <div className="w-80 bg-[#2a2a2a] p-4 flex flex-col">
           <div className="mb-6">
-            <h1 className="text-xl font-medium text-white mb-4">实时面试评分系统</h1>
+            <div className="flex justify-between items-center mb-4">
+              <h1 className="text-xl font-medium text-white">实时面试评分系统</h1>
+              {/* WebSocket连接状态 */}
+              <div className="flex items-center gap-2 bg-black/20 backdrop-blur-sm rounded-lg px-3 py-2">
+                {isConnected ? (
+                  <Wifi className="h-4 w-4 text-green-400" />
+                ) : (
+                  <WifiOff className="h-4 w-4 text-red-400" />
+                )}
+                <span className="text-xs text-white">
+                  {isConnected ? "已连接" : "断开"}
+                </span>
+              </div>
+            </div>
             <div className="text-sm text-gray-400 mb-4">
               {currentTime.toLocaleDateString("zh-CN")} {currentTime.toLocaleTimeString("zh-CN")}
-              <span className="ml-2 text-green-400">● 系统在线</span>
             </div>
 
             {/* 搜索框 */}
@@ -779,7 +854,7 @@ export default function DisplayPage() {
                     </div>
                     <div className="text-xs text-gray-400 mt-1">{candidate.department}</div>
                     <div className="mt-2">
-                      <Progress value={(candidate.scores.length / judges.length) * 100} className="h-1" />
+                      <Progress value={activeJudges.length > 0 ? (candidate.scores.length / activeJudges.length) * 100 : 0} className="h-1" />
                     </div>
                   </div>
                 </div>
@@ -807,21 +882,37 @@ export default function DisplayPage() {
               {/* 评分区域 */}
               <div className="grid grid-cols-3 gap-6">
                 {/* 各维度评分 */}
-                <div className="col-span-2 grid grid-cols-2 gap-4">
-                  {activeDimensions.slice(0, 4).map((dimension) => {
-                    const avgScore = getDimensionAverage(dimension.id)
-                    return (
-                      <Card key={dimension.id} className="bg-[#2a2a2a] border-gray-600">
-                        <CardContent className="p-4">
-                          <div className="flex justify-between items-center mb-3">
-                            <span className="text-gray-300 text-sm">{dimension.name}</span>
-                            <span className="text-2xl font-bold text-white">{avgScore}</span>
-                          </div>
-                          <Progress value={(avgScore / dimension.maxScore) * 100} className="h-2" />
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
+                <div className="col-span-2">
+                  {activeDimensions.length > 0 ? (
+                    <div className={`grid gap-4 ${
+                      activeDimensions.length <= 2 ? 'grid-cols-1' :
+                      activeDimensions.length <= 4 ? 'grid-cols-2' :
+                      activeDimensions.length <= 6 ? 'grid-cols-3' :
+                      'grid-cols-3'
+                    }`}>
+                      {activeDimensions.map((dimension) => {
+                        const avgScore = getDimensionAverage(dimension.id)
+                        return (
+                          <Card key={dimension.id} className="bg-[#2a2a2a] border-gray-600">
+                            <CardContent className="p-4">
+                              <div className="flex justify-between items-center mb-3">
+                                <span className="text-gray-300 text-sm">{dimension.name}</span>
+                                <span className="text-2xl font-bold text-white">{avgScore}</span>
+                              </div>
+                              <Progress value={(avgScore / dimension.maxScore) * 100} className="h-2" />
+                            </CardContent>
+                          </Card>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center h-48 bg-[#2a2a2a] rounded-lg border border-gray-600">
+                      <div className="text-center text-gray-400">
+                        <div className="text-4xl mb-2">📊</div>
+                        <div>暂无评分维度</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 总分圆环 */}
@@ -842,7 +933,8 @@ export default function DisplayPage() {
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <span className="text-4xl font-bold text-white">{currentCandidate.totalScore}</span>
-                      <span className="text-gray-400 text-sm">总分</span>
+                      <span className="text-gray-400 text-sm">面试得分</span>
+                      <span className="text-gray-500 text-xs mt-1">(各评委平均分)</span>
                     </div>
                   </div>
                 </div>
@@ -854,29 +946,194 @@ export default function DisplayPage() {
                 <Card className="bg-[#2a2a2a] border-gray-600">
                   <CardContent className="p-6">
                     <h3 className="text-lg font-medium text-white mb-4">能力雷达</h3>
-                    <div className="flex items-center justify-center h-48">
-                      <svg width="200" height="200" viewBox="0 0 200 200">
-                        {/* 雷达图背景 */}
-                        <polygon
-                          points="100,20 173,80 173,120 100,180 27,120 27,80"
-                          fill="none"
-                          stroke="#3a3a3a"
-                          strokeWidth="1"
-                        />
-                        <polygon
-                          points="100,50 146,90 146,110 100,150 54,110 54,90"
-                          fill="none"
-                          stroke="#3a3a3a"
-                          strokeWidth="1"
-                        />
-                        {/* 数据多边形 */}
-                        <polygon
-                          points="100,30 160,85 160,115 100,170 40,115 40,85"
-                          fill="rgba(59, 130, 246, 0.3)"
-                          stroke="#3b82f6"
-                          strokeWidth="2"
-                        />
-                      </svg>
+                    <div className="flex items-center justify-center h-64">
+                      {(() => {
+                        // 计算雷达图数据
+                        const radarDimensions = activeDimensions.slice(0, 6) // 最多显示6个维度
+                        const centerX = 150
+                        const centerY = 150
+                        const maxRadius = 80
+                        const minRadius = 25
+
+                        if (radarDimensions.length === 0) {
+                          return (
+                            <div className="text-center text-gray-400">
+                              <div className="text-2xl mb-2">📊</div>
+                              <div className="text-sm">暂无评分维度</div>
+                            </div>
+                          )
+                        }
+
+                        // 计算每个维度的角度
+                        const angleStep = (2 * Math.PI) / radarDimensions.length
+
+                        // 生成背景网格点
+                        const generatePolygonPoints = (radius: number) => {
+                          return radarDimensions.map((_, index) => {
+                            const angle = index * angleStep - Math.PI / 2 // 从顶部开始
+                            const x = centerX + radius * Math.cos(angle)
+                            const y = centerY + radius * Math.sin(angle)
+                            return `${x},${y}`
+                          }).join(' ')
+                        }
+
+                        // 生成数据点
+                        const generateDataPoints = () => {
+                          return radarDimensions.map((dimension, index) => {
+                            const avgScore = getDimensionAverage(dimension.id)
+                            const maxScore = dimension.maxScore
+                            const ratio = maxScore > 0 ? avgScore / maxScore : 0
+                            const radius = minRadius + (maxRadius - minRadius) * ratio
+
+                            const angle = index * angleStep - Math.PI / 2
+                            const x = centerX + radius * Math.cos(angle)
+                            const y = centerY + radius * Math.sin(angle)
+                            return `${x},${y}`
+                          }).join(' ')
+                        }
+
+                        // 生成标签位置
+                        const generateLabels = () => {
+                          return radarDimensions.map((dimension, index) => {
+                            const angle = index * angleStep - Math.PI / 2
+                            const labelRadius = maxRadius + 25
+                            const x = centerX + labelRadius * Math.cos(angle)
+                            const y = centerY + labelRadius * Math.sin(angle)
+
+                            // 根据角度调整文本锚点，避免文字被截断
+                            let textAnchor = "middle"
+                            if (Math.cos(angle) > 0.5) textAnchor = "start"
+                            else if (Math.cos(angle) < -0.5) textAnchor = "end"
+
+                            return (
+                              <text
+                                key={dimension.id}
+                                x={x}
+                                y={y}
+                                textAnchor={textAnchor}
+                                dominantBaseline="middle"
+                                fill="#ffffff"
+                                fontSize="14"
+                                fontWeight="500"
+                                style={{
+                                  textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
+                                  fill: '#ffffff !important',
+                                  color: '#ffffff'
+                                }}
+                              >
+                                {dimension.name}
+                              </text>
+                            )
+                          })
+                        }
+
+                        return (
+                          <svg width="300" height="300" viewBox="0 0 300 300" style={{ color: '#ffffff' }}>
+                            {/* 背景网格 */}
+                            <polygon
+                              points={generatePolygonPoints(maxRadius)}
+                              fill="none"
+                              stroke="#6b7280"
+                              strokeWidth="1.5"
+                            />
+                            <polygon
+                              points={generatePolygonPoints(maxRadius * 0.7)}
+                              fill="none"
+                              stroke="#6b7280"
+                              strokeWidth="1"
+                            />
+                            <polygon
+                              points={generatePolygonPoints(maxRadius * 0.4)}
+                              fill="none"
+                              stroke="#6b7280"
+                              strokeWidth="1"
+                            />
+
+                            {/* 轴线 */}
+                            {radarDimensions.map((_, index) => {
+                              const angle = index * angleStep - Math.PI / 2
+                              const endX = centerX + maxRadius * Math.cos(angle)
+                              const endY = centerY + maxRadius * Math.sin(angle)
+                              return (
+                                <line
+                                  key={index}
+                                  x1={centerX}
+                                  y1={centerY}
+                                  x2={endX}
+                                  y2={endY}
+                                  stroke="#6b7280"
+                                  strokeWidth="1"
+                                />
+                              )
+                            })}
+
+                            {/* 数据多边形 */}
+                            {radarDimensions.length >= 3 && (
+                              <polygon
+                                points={generateDataPoints()}
+                                fill="rgba(59, 130, 246, 0.4)"
+                                stroke="#60a5fa"
+                                strokeWidth="2.5"
+                              />
+                            )}
+
+                            {/* 数据点 */}
+                            {radarDimensions.map((dimension, index) => {
+                              const avgScore = getDimensionAverage(dimension.id)
+                              const maxScore = dimension.maxScore
+                              const ratio = maxScore > 0 ? avgScore / maxScore : 0
+                              const radius = minRadius + (maxRadius - minRadius) * ratio
+
+                              const angle = index * angleStep - Math.PI / 2
+                              const x = centerX + radius * Math.cos(angle)
+                              const y = centerY + radius * Math.sin(angle)
+
+                              return (
+                                <g key={dimension.id}>
+                                  <circle
+                                    cx={x}
+                                    cy={y}
+                                    r="4"
+                                    fill="#60a5fa"
+                                    stroke="#ffffff"
+                                    strokeWidth="2"
+                                  />
+                                  {/* 显示分数 */}
+                                  <text
+                                    x={x}
+                                    y={y - 12}
+                                    textAnchor="middle"
+                                    fill="#ffffff"
+                                    fontSize="12"
+                                    fontWeight="bold"
+                                    style={{
+                                      textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
+                                      fill: '#ffffff !important',
+                                      color: '#ffffff'
+                                    }}
+                                  >
+                                    {avgScore.toFixed(1)}
+                                  </text>
+                                </g>
+                              )
+                            })}
+
+                            {/* 维度标签 */}
+                            {generateLabels()}
+                          </svg>
+                        )
+                      })()}
+                    </div>
+                    {/* 雷达图说明 */}
+                    <div className="mt-4 text-center">
+                      <div className="text-xs text-gray-400">
+                        显示各评分维度的平均得分情况
+                      </div>
+                      {activeDimensions.length > 0 && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          共 {activeDimensions.length} 个维度 | 最大分值: {Math.max(...activeDimensions.map(d => d.maxScore))}
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -886,25 +1143,34 @@ export default function DisplayPage() {
                   <CardContent className="p-6">
                     <h3 className="text-lg font-medium text-white mb-4">评委实时评分</h3>
                     <div className="space-y-3">
-                      {judges.slice(0, 3).map((judge, index) => {
-                        const judgeScore = currentCandidate.scores.find((s) => s.judgeId === judge.id)
-                        const score = judgeScore ? judgeScore.totalScore : 0
-                        return (
-                          <div key={judge.id} className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <User className="h-4 w-4 text-gray-400" />
-                              <span className="text-gray-300">{judge.name}</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="w-24">
-                                <Progress value={(score / 100) * 100} className="h-2" />
+                      {judges
+                        .filter((judge) => judge.isActive)
+                        .slice(0, 4)
+                        .map((judge, index) => {
+                          const judgeScore = currentCandidate.scores.find((s) => s.judgeId === judge.id)
+                          // 确保分数是数字类型
+                          const score = judgeScore ? Number(judgeScore.totalScore) || 0 : 0
+                          return (
+                            <div key={judge.id} className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <User className="h-4 w-4 text-gray-400" />
+                                <span className="text-gray-300">{judge.name}</span>
                               </div>
-                              <span className="text-white font-medium w-8">{score}</span>
+                              <div className="flex items-center gap-3">
+                                <div className="w-24">
+                                  <Progress value={(score / 100) * 100} className="h-2" />
+                                </div>
+                                <span className="text-white font-medium w-8">{score}</span>
+                              </div>
                             </div>
-                          </div>
-                        )
-                      })}
+                          )
+                        })}
                     </div>
+                    {judges.filter((judge) => judge.isActive).length === 0 && (
+                      <div className="text-center py-4">
+                        <div className="text-gray-400 text-sm">暂无启用的评委</div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -922,82 +1188,136 @@ export default function DisplayPage() {
 
         {/* 右侧统计区域 */}
         <div className="w-80 bg-[#2a2a2a] p-4">
-          {/* 总体统计 */}
-          <Card className="bg-[#3a3a3a] border-gray-600 mb-6">
+          {/* 面试成绩统计 */}
+          <Card className="bg-[#3a3a3a] border-gray-600 mb-4">
             <CardContent className="p-4">
-              <h3 className="text-lg font-medium text-white mb-4">总体统计</h3>
+              <h3 className="text-lg font-medium text-white mb-4">面试成绩统计</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center">
-                  <div className="text-sm text-gray-400 mb-1">已评分/总人数</div>
-                  <div className="text-2xl font-bold text-white">
-                    {candidates.filter((c) => c.scores.length > 0).length}/{candidates.length}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-sm text-gray-400 mb-1">平均分</div>
-                  <div className="text-2xl font-bold text-white">{averageScore}</div>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-4">
-                <div className="text-center">
                   <div className="text-sm text-gray-400 mb-1">最高分</div>
-                  <div className="text-xl font-bold text-green-400">
-                    {candidates.length > 0 ? Math.max(...candidates.map((c) => c.finalScore)) : 0}
+                  <div className="text-2xl font-bold text-green-400">
+                    {interviewStats.highest}
                   </div>
                 </div>
                 <div className="text-center">
                   <div className="text-sm text-gray-400 mb-1">最低分</div>
-                  <div className="text-xl font-bold text-red-400">
-                    {candidates.length > 0 ? Math.min(...candidates.map((c) => c.finalScore)) : 0}
+                  <div className="text-2xl font-bold text-red-400">
+                    {interviewStats.lowest}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-4">
+                <div className="text-center">
+                  <div className="text-sm text-gray-400 mb-1">平均分</div>
+                  <div className="text-xl font-bold text-blue-400">
+                    {interviewStats.average}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm text-gray-400 mb-1">已评分人数</div>
+                  <div className="text-xl font-bold text-white">
+                    {interviewStats.count}/{candidates.length}
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* 排名列表 */}
+          {/* 最终排名 */}
+          <Card className="bg-[#3a3a3a] border-gray-600 mb-4">
+            <CardContent className="p-4">
+              <h3 className="text-lg font-medium text-white mb-4">最终排名</h3>
+              {scoredCandidates.length > 0 ? (
+                <div className="space-y-2">
+                  {sortedCandidates.slice(0, 3).map((candidate, index) => (
+                    <div
+                      key={candidate.id}
+                      className={`flex items-center justify-between p-2 rounded ${
+                        candidate.id === currentCandidate?.id ? "bg-blue-500/20" : "bg-[#2a2a2a]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium ${
+                            index === 0
+                              ? "bg-yellow-500 text-black"
+                              : index === 1
+                                ? "bg-gray-400 text-black"
+                                : "bg-orange-500 text-black"
+                          }`}
+                        >
+                          {index + 1}
+                        </div>
+                        <span className="text-white text-sm">{candidate.name}</span>
+                      </div>
+                      <span className="text-blue-400 font-medium text-sm">{candidate.finalScore}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-2">
+                  <div className="text-gray-400 text-sm">暂无评分数据</div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 详细排名列表 */}
           <div>
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-white">排名列表</h3>
-              <Badge className="bg-blue-500 text-white text-xs">实时更新</Badge>
+              <h3 className="text-lg font-medium text-white">详细排名</h3>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-green-500 text-white text-xs">
+                  {scoredCandidates.length}人已评分
+                </Badge>
+                <Badge className="bg-blue-500 text-white text-xs">实时更新</Badge>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              {sortedCandidates.slice(0, 6).map((candidate, index) => (
-                <div
-                  key={candidate.id}
-                  className={`p-3 rounded-lg ${
-                    candidate.id === currentCandidate?.id ? "bg-blue-500/20 border border-blue-500" : "bg-[#3a3a3a]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                          index === 0
-                            ? "bg-yellow-500 text-black"
-                            : index === 1
-                              ? "bg-gray-400 text-black"
-                              : index === 2
-                                ? "bg-orange-500 text-black"
-                                : "bg-gray-600 text-white"
-                        }`}
-                      >
-                        {index + 1}
+            {scoredCandidates.length > 0 ? (
+              <div className="space-y-2">
+                {sortedCandidates.map((candidate, index) => (
+                  <div
+                    key={candidate.id}
+                    className={`p-2 rounded-lg ${
+                      candidate.id === currentCandidate?.id ? "bg-blue-500/20 border border-blue-500" : "bg-[#3a3a3a]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium ${
+                            index === 0
+                              ? "bg-yellow-500 text-black"
+                              : index === 1
+                                ? "bg-gray-400 text-black"
+                                : index === 2
+                                  ? "bg-orange-500 text-black"
+                                  : "bg-gray-600 text-white"
+                          }`}
+                        >
+                          {index + 1}
+                        </div>
+                        <div>
+                          <div className="text-white text-sm font-medium">{candidate.name}</div>
+                          <div className="text-xs text-gray-400">{candidate.department}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-white font-medium">{candidate.name}</div>
-                        <div className="text-xs text-gray-400">{candidate.department}</div>
+                      <div className="text-right">
+                        <div className="text-white text-sm font-bold">最终: {candidate.finalScore}</div>
+                        <div className="text-gray-400 text-xs">面试: {candidate.totalScore}</div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-white font-bold">{candidate.finalScore}</div>
-                      <Badge className="bg-blue-500 text-white text-xs mt-1">已评分</Badge>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6">
+                <div className="text-3xl mb-2">📊</div>
+                <div className="text-gray-400 text-sm">暂无已评分人员</div>
+                <div className="text-gray-500 text-xs mt-1">评分完成后将显示排名</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1036,7 +1356,7 @@ export default function DisplayPage() {
             switch (displaySession.currentStage) {
               case "opening":
                 return renderOpeningStage()
-              case "questioning":
+              case "interviewing":
                 return renderQuestioningStage()
               case "scoring":
                 return renderScoringStage()
@@ -1067,7 +1387,7 @@ export default function DisplayPage() {
     switch (displaySession.currentStage) {
       case "opening":
         return renderOpeningStage()
-      case "questioning":
+      case "interviewing":
         return renderQuestioningStage()
       case "scoring":
         return renderScoringStage()
@@ -1080,9 +1400,11 @@ export default function DisplayPage() {
     <>
       {mainContent}
       {/* 倒计时警告覆盖层 */}
-      {displaySession.currentStage === "questioning" && (
+      {displaySession.currentStage === "interviewing" && (
         <TimerWarningOverlay timeRemaining={timeRemaining} />
       )}
+
+
     </>
   )
 }

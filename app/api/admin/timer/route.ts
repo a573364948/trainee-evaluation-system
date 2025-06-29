@@ -23,9 +23,17 @@ export async function POST(request: NextRequest) {
         enhancedScoringStore.resetTimer()
         break
       case 'setDuration':
-        if (duration) {
-          enhancedScoringStore.setTimerDuration(duration)
+        if (duration !== undefined) {
+          if (duration === 0) {
+            // 特殊处理：归零操作
+            enhancedScoringStore.setTimerToZero()
+          } else {
+            enhancedScoringStore.setTimerDuration(duration)
+          }
         }
+        break
+      case 'setToZero':
+        enhancedScoringStore.setTimerToZero()
         break
       default:
         return NextResponse.json({ error: "Invalid action" }, { status: 400 })

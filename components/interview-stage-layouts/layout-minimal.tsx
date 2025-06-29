@@ -85,24 +85,39 @@ export function LayoutMinimal({
           </div>
 
           {/* 计时器 - 突出显示 */}
-          {currentItem.timeLimit && (
-            <div className="mb-16">
-              <div className="inline-block bg-gradient-to-r from-orange-500/10 to-red-500/10 backdrop-blur-sm border border-orange-500/20 rounded-3xl p-12">
-                <div className="flex items-center gap-8">
-                  <Clock className="w-16 h-16 text-orange-400" />
-                  <div>
-                    <div className="text-8xl font-bold text-orange-400 mb-2">
-                      {formatTime(timeRemaining)}
+          {currentItem.timeLimit && (() => {
+            const isWarning = timeRemaining <= 30000 && timeRemaining > 0 // 30秒警告
+            const isCritical = timeRemaining <= 10000 && timeRemaining > 0 // 10秒危险
+
+            return (
+              <div className="mb-16">
+                <div className={`inline-block backdrop-blur-sm rounded-3xl p-12 transition-all duration-1000 ${
+                  isCritical
+                    ? 'bg-gradient-to-r from-red-500/15 to-red-600/15 border border-red-500/30'
+                    : isWarning
+                    ? 'bg-gradient-to-r from-orange-500/12 to-red-500/12 border border-orange-500/25'
+                    : 'bg-gradient-to-r from-orange-500/10 to-red-500/10 border border-orange-500/20'
+                }`}>
+                  <div className="flex items-center gap-8">
+                    <Clock className={`w-16 h-16 transition-colors duration-1000 ${
+                      isCritical ? 'text-red-400' : 'text-orange-400'
+                    }`} />
+                    <div>
+                      <div className={`text-8xl font-bold mb-2 transition-colors duration-1000 ${
+                        isCritical ? 'text-red-400' : 'text-orange-400'
+                      }`}>
+                        {formatTime(timeRemaining)}
+                      </div>
+                      <Progress
+                        value={(timeRemaining / (currentItem.timeLimit * 1000)) * 100}
+                        className="w-80 h-3"
+                      />
                     </div>
-                    <Progress
-                      value={(timeRemaining / (currentItem.timeLimit * 1000)) * 100}
-                      className="w-80 h-3"
-                    />
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* 环节提示 - 简洁版 */}
           <div className="max-w-3xl mx-auto">
@@ -162,17 +177,15 @@ export function LayoutMinimal({
             <div className="flex items-center gap-4">
               <span className="text-sm text-gray-400">评委在线</span>
               <div className="flex gap-1">
-                {judges.map((judge) => (
+                {judges.filter(j => j.isActive).map((judge) => (
                   <div
                     key={judge.id}
-                    className={`w-2 h-2 rounded-full ${
-                      judge.isActive ? 'bg-green-500' : 'bg-gray-600'
-                    }`}
+                    className="w-2 h-2 rounded-full bg-green-500"
                   />
                 ))}
               </div>
               <span className="text-sm text-white">
-                {judges.filter(j => j.isActive).length}/{judges.length}
+                {judges.filter(j => j.isActive).length}位评委在线
               </span>
             </div>
           </div>

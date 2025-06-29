@@ -26,31 +26,124 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { Edit, Trash2, Upload, Archive, Users, Target, Calculator, RefreshCw } from "lucide-react"
-import type { Batch, Judge, InterviewDimension, ScoreItem } from "@/types/scoring"
+import {
+  Edit,
+  Trash2,
+  Upload,
+  Archive,
+  Users,
+  Target,
+  Calculator,
+  RefreshCw,
+  Play,
+  Pause,
+  Square,
+  RotateCcw,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  Circle
+} from "lucide-react"
+import type {
+  Batch,
+  EnhancedBatch,
+  BatchStatus,
+  Judge,
+  InterviewDimension,
+  ScoreItem
+} from "@/types/scoring"
 
 interface BatchManagementProps {
   batches: Batch[]
+  enhancedBatches?: EnhancedBatch[]
+  activeBatch?: EnhancedBatch | null
   judges: Judge[]
   dimensions: InterviewDimension[]
   scoreItems: ScoreItem[]
   onRefresh: () => void
+  enhanced?: boolean
 }
 
-export default function BatchManagement({ batches, judges, dimensions, scoreItems, onRefresh }: BatchManagementProps) {
+export default function BatchManagement({
+  batches,
+  enhancedBatches = [],
+  activeBatch,
+  judges,
+  dimensions,
+  scoreItems,
+  onRefresh,
+  enhanced = true
+}: BatchManagementProps) {
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showLoadDialog, setShowLoadDialog] = useState(false)
   const [showClearDialog, setShowClearDialog] = useState(false)
+  const [showActionDialog, setShowActionDialog] = useState(false)
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null)
   const [deletingBatch, setDeletingBatch] = useState<Batch | null>(null)
   const [loadingBatch, setLoadingBatch] = useState<Batch | null>(null)
+  const [actioningBatch, setActioningBatch] = useState<EnhancedBatch | null>(null)
+  const [pendingAction, setPendingAction] = useState<string>('')
   const [formData, setFormData] = useState({
     name: "",
     description: "",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // 批次状态辅助函数
+  const getStatusColor = (status: BatchStatus): string => {
+    switch (status) {
+      case 'draft': return 'bg-gray-100 text-gray-800'
+      case 'active': return 'bg-green-100 text-green-800'
+      case 'paused': return 'bg-yellow-100 text-yellow-800'
+      case 'completed': return 'bg-blue-100 text-blue-800'
+      case 'archived': return 'bg-purple-100 text-purple-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const getStatusIcon = (status: BatchStatus) => {
+    switch (status) {
+      case 'draft': return <Circle className="h-3 w-3" />
+      case 'active': return <Play className="h-3 w-3" />
+      case 'paused': return <Pause className="h-3 w-3" />
+      case 'completed': return <CheckCircle className="h-3 w-3" />
+      case 'archived': return <Archive className="h-3 w-3" />
+      default: return <Circle className="h-3 w-3" />
+    }
+  }
+
+  const getStatusText = (status: BatchStatus): string => {
+    switch (status) {
+      case 'draft': return '草稿'
+      case 'active': return '进行中'
+      case 'paused': return '已暂停'
+      case 'completed': return '已完成'
+      case 'archived': return '已归档'
+      default: return '未知'
+    }
+  }
+
+  const getAvailableActions = (batch: EnhancedBatch): Array<{action: string, label: string, icon: any, variant?: string}> => {
+    const actions = []
+
+    switch (batch.status) {
+      case 'draft':
+        actions.push({ action: 'start', label: '开始批次', icon: Play, variant: 'default' })
+        break
+      case 'active':
+        actions.push({ action: 'pause', label: '暂停批次', icon: Pause, variant: 'outline' })
+        actions.push({ action: 'complete', label: '完成批次', icon: CheckCircle, variant: 'destructive' })
+        break
+      case 'paused':
+        actions.push({ action: 'resume', label: '恢复批次', icon: RotateCcw, variant: 'default' })
+        actions.push({ action: 'complete', label: '完成批次', icon: CheckCircle, variant: 'destructive' })
+        break
+    }
+
+    return actions
+  }
 
   const resetForm = () => {
     setFormData({
@@ -67,7 +160,10 @@ export default function BatchManagement({ batches, judges, dimensions, scoreItem
       const response = await fetch("/api/admin/batches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          enhanced: enhanced
+        }),
       })
 
       if (response.ok) {
@@ -134,6 +230,8 @@ export default function BatchManagement({ batches, judges, dimensions, scoreItem
     try {
       const response = await fetch(`/api/admin/batches/${loadingBatch.id}/load`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enhanced: false })
       })
 
       if (response.ok) {
@@ -143,6 +241,58 @@ export default function BatchManagement({ batches, judges, dimensions, scoreItem
       }
     } catch (error) {
       console.error("加载批次失败:", error)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // 增强批次操作处理
+  const handleBatchAction = async () => {
+    if (!actioningBatch || !pendingAction) return
+
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`/api/admin/batches/${actioningBatch.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: pendingAction })
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setShowActionDialog(false)
+        setActioningBatch(null)
+        setPendingAction('')
+        onRefresh()
+
+        // 显示成功消息
+        console.log(`批次操作成功: ${result.message}`)
+      } else {
+        console.error("批次操作失败:", result.error)
+      }
+    } catch (error) {
+      console.error("批次操作失败:", error)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleEnhancedLoad = async (batch: EnhancedBatch) => {
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`/api/admin/batches/${batch.id}/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enhanced: true })
+      })
+
+      if (response.ok) {
+        onRefresh()
+        console.log(`增强批次加载成功: ${batch.name}`)
+      }
+    } catch (error) {
+      console.error("加载增强批次失败:", error)
     } finally {
       setIsSubmitting(false)
     }
@@ -183,6 +333,12 @@ export default function BatchManagement({ batches, judges, dimensions, scoreItem
   const openLoadDialog = (batch: Batch) => {
     setLoadingBatch(batch)
     setShowLoadDialog(true)
+  }
+
+  const openActionDialog = (batch: EnhancedBatch, action: string) => {
+    setActioningBatch(batch)
+    setPendingAction(action)
+    setShowActionDialog(true)
   }
 
   const formatDate = (timestamp: number) => {
@@ -247,9 +403,43 @@ export default function BatchManagement({ batches, judges, dimensions, scoreItem
           <CardDescription>管理已保存的配置批次，可快速切换不同的面试配置</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* 活跃批次状态显示 */}
+          {enhanced && activeBatch && (
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    {getStatusIcon(activeBatch.status)}
+                    <span className="font-medium text-green-800">当前活跃批次</span>
+                  </div>
+                  <div>
+                    <span className="font-semibold text-green-900">{activeBatch.name}</span>
+                    <span className="ml-2 text-sm text-green-700">
+                      {activeBatch.runtime.metadata.totalCandidates} 位候选人
+                    </span>
+                  </div>
+                </div>
+                <Badge className={getStatusColor(activeBatch.status)}>
+                  {getStatusText(activeBatch.status)}
+                </Badge>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-between items-center mb-6">
             <div className="text-sm text-gray-600">
-              共 <span className="font-semibold">{batches.length}</span> 个批次
+              {enhanced ? (
+                <>
+                  共 <span className="font-semibold">{enhancedBatches.length}</span> 个增强批次
+                  {activeBatch && (
+                    <span className="ml-2 text-green-600">
+                      • 1 个活跃批次
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>共 <span className="font-semibold">{batches.length}</span> 个传统批次</>
+              )}
             </div>
             <div className="flex gap-2">
               <Button
@@ -267,64 +457,164 @@ export default function BatchManagement({ batches, judges, dimensions, scoreItem
             <TableHeader>
               <TableRow>
                 <TableHead>批次名称</TableHead>
+                {enhanced && <TableHead>状态</TableHead>}
                 <TableHead>配置详情</TableHead>
+                {enhanced && <TableHead>进度信息</TableHead>}
                 <TableHead>创建时间</TableHead>
                 <TableHead>更新时间</TableHead>
                 <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {batches.map((batch) => (
-                <TableRow key={batch.id}>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{batch.name}</div>
-                      <div className="text-sm text-gray-500">{batch.description}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Badge variant="outline" className="text-blue-600">
-                        {batch.config.judges.length} 评委
+              {enhanced ? (
+                // 增强批次渲染
+                enhancedBatches.map((batch) => (
+                  <TableRow key={batch.id} className={batch.status === 'active' ? 'bg-green-50' : ''}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium flex items-center gap-2">
+                          {batch.name}
+                          {batch.status === 'active' && (
+                            <Badge variant="outline" className="text-green-600 border-green-300">
+                              活跃
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-sm text-gray-500">{batch.description}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={getStatusColor(batch.status)}>
+                        <div className="flex items-center gap-1">
+                          {getStatusIcon(batch.status)}
+                          {getStatusText(batch.status)}
+                        </div>
                       </Badge>
-                      <Badge variant="outline" className="text-green-600">
-                        {batch.config.dimensions.filter((d) => d.isActive).length} 维度
-                      </Badge>
-                      <Badge variant="outline" className="text-purple-600">
-                        {batch.config.scoreItems.filter((s) => s.isActive).length} 项目
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm text-gray-600">{formatDate(batch.createdAt)}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm text-gray-600">{formatDate(batch.updatedAt)}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={() => openLoadDialog(batch)} className="flex items-center gap-1">
-                        <Upload className="h-3 w-3" />
-                        加载
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => openEditDialog(batch)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => openDeleteDialog(batch)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="text-blue-600">
+                          {batch.config.judges.length} 评委
+                        </Badge>
+                        <Badge variant="outline" className="text-green-600">
+                          {batch.config.dimensions.length} 维度
+                        </Badge>
+                        <Badge variant="outline" className="text-purple-600">
+                          {batch.config.scoreItems.length} 项目
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        <div className="text-gray-900">
+                          {batch.runtime.metadata.totalCandidates} 位候选人
+                        </div>
+                        <div className="text-gray-500">
+                          已完成: {batch.runtime.metadata.completedCandidates}
+                        </div>
+                        {batch.runtime.metadata.averageScore > 0 && (
+                          <div className="text-gray-500">
+                            平均分: {batch.runtime.metadata.averageScore}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm text-gray-600">{formatDate(batch.createdAt)}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm text-gray-600">{formatDate(batch.lastActiveAt)}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1 flex-wrap">
+                        {/* 批次操作按钮 */}
+                        {getAvailableActions(batch).map((action) => (
+                          <Button
+                            key={action.action}
+                            size="sm"
+                            variant={action.variant as any}
+                            onClick={() => openActionDialog(batch, action.action)}
+                            className="flex items-center gap-1"
+                            disabled={isSubmitting}
+                          >
+                            <action.icon className="h-3 w-3" />
+                            {action.label}
+                          </Button>
+                        ))}
+
+                        {/* 加载按钮 */}
+                        {batch.status !== 'active' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleEnhancedLoad(batch)}
+                            className="flex items-center gap-1"
+                            disabled={isSubmitting}
+                          >
+                            <Upload className="h-3 w-3" />
+                            加载
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                // 传统批次渲染
+                batches.map((batch) => (
+                  <TableRow key={batch.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{batch.name}</div>
+                        <div className="text-sm text-gray-500">{batch.description}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="text-blue-600">
+                          {batch.config.judges.length} 评委
+                        </Badge>
+                        <Badge variant="outline" className="text-green-600">
+                          {batch.config.dimensions.filter((d) => d.isActive).length} 维度
+                        </Badge>
+                        <Badge variant="outline" className="text-purple-600">
+                          {batch.config.scoreItems.filter((s) => s.isActive).length} 项目
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm text-gray-600">{formatDate(batch.createdAt)}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm text-gray-600">{formatDate(batch.updatedAt)}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => openLoadDialog(batch)} className="flex items-center gap-1">
+                          <Upload className="h-3 w-3" />
+                          加载
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => openEditDialog(batch)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => openDeleteDialog(batch)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
 
-          {batches.length === 0 && (
+          {(enhanced ? enhancedBatches.length === 0 : batches.length === 0) && (
             <div className="text-center py-8 text-gray-500">
               <Archive className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>暂无保存的批次</p>
-              <p className="text-sm">保存当前配置为第一个批次</p>
+              <p className="text-sm">
+                {enhanced ? '创建第一个增强批次开始管理面试流程' : '保存当前配置为第一个批次'}
+              </p>
             </div>
           )}
         </CardContent>
@@ -464,6 +754,67 @@ export default function BatchManagement({ batches, judges, dimensions, scoreItem
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} disabled={isSubmitting} className="bg-red-600 hover:bg-red-700">
               {isSubmitting ? "删除中..." : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 批次操作确认对话框 */}
+      <AlertDialog open={showActionDialog} onOpenChange={setShowActionDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              确认批次操作
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {actioningBatch && (
+                <div className="space-y-3">
+                  <div>
+                    您确定要对批次 <span className="font-medium">"{actioningBatch.name}"</span> 执行以下操作吗？
+                  </div>
+
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      {pendingAction === 'start' && <Play className="h-4 w-4 text-green-600" />}
+                      {pendingAction === 'pause' && <Pause className="h-4 w-4 text-yellow-600" />}
+                      {pendingAction === 'resume' && <RotateCcw className="h-4 w-4 text-blue-600" />}
+                      {pendingAction === 'complete' && <CheckCircle className="h-4 w-4 text-blue-600" />}
+                      <span className="font-medium">
+                        {pendingAction === 'start' && '开始批次'}
+                        {pendingAction === 'pause' && '暂停批次'}
+                        {pendingAction === 'resume' && '恢复批次'}
+                        {pendingAction === 'complete' && '完成批次'}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {pendingAction === 'start' && '批次将变为活跃状态，开始面试流程'}
+                      {pendingAction === 'pause' && '批次将暂停，可稍后恢复'}
+                      {pendingAction === 'resume' && '批次将恢复为活跃状态'}
+                      {pendingAction === 'complete' && '批次将标记为完成，无法再次激活'}
+                    </div>
+                  </div>
+
+                  <div className="text-sm text-gray-500">
+                    当前状态: <Badge className={getStatusColor(actioningBatch.status)}>
+                      {getStatusText(actioningBatch.status)}
+                    </Badge>
+                  </div>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBatchAction}
+              disabled={isSubmitting}
+              className={
+                pendingAction === 'complete'
+                  ? "bg-red-600 hover:bg-red-700"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }
+            >
+              {isSubmitting ? "执行中..." : "确认操作"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -78,14 +78,32 @@ export interface ScoringEvent {
 
 **修改示例：**
 ```typescript
-// 旧代码
-private emitEvent(type: ScoringEvent['type'], data: any) {
-  // SSE事件发送逻辑
+// 旧代码 (第497-506行)
+private emitEvent(event: ScoringEvent) {
+  this.eventListeners.forEach((listener, index) => {
+    try {
+      listener(event)
+    } catch (error) {
+      console.error(`Error in listener ${index}:`, error)
+    }
+  })
 }
 
-// 新代码  
-private emitEvent(type: ScoringEvent['type'], data: any) {
-  this.webSocketManager.broadcast(type, data)
+// 新代码 (双重发送：保持兼容性 + 添加WebSocket)
+private emitEvent(event: ScoringEvent) {
+  // 1. 保持现有EventEmitter (兼容性)
+  this.eventListeners.forEach((listener, index) => {
+    try {
+      listener(event)
+    } catch (error) {
+      console.error(`Error in listener ${index}:`, error)
+    }
+  })
+  
+  // 2. 新增WebSocket广播
+  if (this.webSocketManager) {
+    this.webSocketManager.broadcastEvent(event)
+  }
 }
 ```
 
@@ -131,15 +149,15 @@ export interface WebSocketMessage {
 ```
 
 **2. 大屏显示页面 - `app/display/page.tsx`**
-- [ ] 替换SSE连接为WebSocket
-- [ ] 保持现有事件监听
-- [ ] 优化重连处理
-- [ ] 添加连接质量显示
+- [ ] 替换SSE连接为WebSocket (第57-291行)
+- [ ] 保持现有事件监听 (stage_changed, question_changed, timer_changed)
+- [ ] 优化重连处理 (移除原有reconnectTimer逻辑)
+- [ ] 添加连接质量显示 (替换心跳显示)
 
-**3. 评分页面 - `app/score/page.tsx`**
-- [ ] 集成WebSocket连接
-- [ ] 保持评分同步功能
-- [ ] 添加离线提示
+**3. 评委页面 - `app/judge/page.tsx`** ⚠️ 修正路径
+- [ ] 集成WebSocket连接 (第98-172行，带judgeId参数)
+- [ ] 保持评分同步功能 (candidate_changed事件处理)
+- [ ] 添加离线提示 (连接状态监控)
 
 ### 第四阶段：测试验证
 

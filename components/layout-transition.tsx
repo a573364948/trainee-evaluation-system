@@ -46,11 +46,23 @@ export function LayoutTransition({
       // 完成过渡
       if (currentTime >= totalDuration) {
         clearInterval(interval)
-        onTransitionComplete?.()
+        // 确保回调被触发
+        setTimeout(() => {
+          onTransitionComplete?.()
+        }, 0)
       }
     }, 50)
 
-    return () => clearInterval(interval)
+    // 备用机制：确保过渡一定会结束
+    const fallbackTimeout = setTimeout(() => {
+      clearInterval(interval)
+      onTransitionComplete?.()
+    }, 1300) // 比预期时间稍长一点
+
+    return () => {
+      clearInterval(interval)
+      clearTimeout(fallbackTimeout)
+    }
   }, [isTransitioning, onTransitionComplete])
 
   if (!isTransitioning) return null

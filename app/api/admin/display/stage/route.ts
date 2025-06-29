@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     const { stage } = await request.json()
     console.log("API: Setting stage to:", stage) // 添加调试日志
 
-    if (!["opening", "questioning", "scoring"].includes(stage)) {
+    if (!["opening", "interviewing", "scoring"].includes(stage)) {
       return NextResponse.json({ success: false, error: "Invalid stage" }, { status: 400 })
     }
 

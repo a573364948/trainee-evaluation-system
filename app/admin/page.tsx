@@ -29,22 +29,34 @@ import {
   Square,
   FileText,
   Plus,
+  Wifi,
+  WifiOff,
 } from "lucide-react"
-import type { Candidate, Judge, InterviewDimension, ScoreItem, Batch, Question, InterviewItem } from "@/types/scoring"
+import type { Candidate, Judge, InterviewDimension, ScoreItem, Batch, EnhancedBatch, Question, InterviewItem, ScoringEvent } from "@/types/scoring"
 import CandidateManagement from "@/components/candidate-management"
 import JudgeManagement from "@/components/judge-management"
 import InterviewDimensions from "@/components/interview-dimensions"
 import ScoreItems from "@/components/score-items"
+import CandidateScoreManagement from "@/components/candidate-score-management"
 import BatchManagement from "@/components/batch-management"
 import InterviewItemManager from "@/components/interview-item-manager"
 import { TimerControl } from "@/components/timer-control"
+import { useWebSocket } from "@/hooks/useWebSocket"
 
 export default function AdminPage() {
+  // WebSocket连接
+  const { isConnected, sendEvent, onScoringEvent } = useWebSocket({
+    clientType: 'admin',
+    autoConnect: true
+  })
+
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [judges, setJudges] = useState<Judge[]>([])
   const [dimensions, setDimensions] = useState<InterviewDimension[]>([])
   const [scoreItems, setScoreItems] = useState<ScoreItem[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
+  const [enhancedBatches, setEnhancedBatches] = useState<EnhancedBatch[]>([])
+  const [activeBatch, setActiveBatch] = useState<EnhancedBatch | null>(null)
   const [currentCandidate, setCurrentCandidate] = useState<Candidate | null>(null)
   const [activeTab, setActiveTab] = useState("dashboard")
   const [questions, setQuestions] = useState<Question[]>([])
@@ -57,6 +69,7 @@ export default function AdminPage() {
   const [interviewItems, setInterviewItems] = useState<InterviewItem[]>([])
   const [showItemManager, setShowItemManager] = useState(false)
 
+  // 初始化数据加载
   useEffect(() => {
     // 更新时间
     const timer = setInterval(() => {
@@ -69,113 +82,103 @@ export default function AdminPage() {
       fetch("/api/admin/dimensions").then((res) => res.json()),
       fetch("/api/admin/score-items").then((res) => res.json()),
       fetch("/api/admin/batches").then((res) => res.json()),
+      fetch("/api/admin/batches?enhanced=true").then((res) => res.json()),
       fetch("/api/admin/questions").then((res) => res.json()),
       fetch("/api/admin/interview-items").then((res) => res.json()).catch(() => ({ items: [] })),
       fetch("/api/admin/display/stage").then((res) => res.json()).catch(() => ({ session: null })),
-    ]).then(([scoreData, dimensionsData, scoreItemsData, batchesData, questionsData, interviewItemsData, sessionData]) => {
+    ]).then(([scoreData, dimensionsData, scoreItemsData, batchesData, enhancedBatchesData, questionsData, interviewItemsData, sessionData]) => {
       setCandidates(scoreData.candidates)
       setJudges(scoreData.judges)
       setCurrentCandidate(scoreData.currentCandidate)
       setDimensions(dimensionsData.dimensions)
       setScoreItems(scoreItemsData.scoreItems)
       setBatches(batchesData.batches)
+
+      // 处理增强批次数据
+      if (enhancedBatchesData.success) {
+        setEnhancedBatches(enhancedBatchesData.batches)
+        setActiveBatch(enhancedBatchesData.activeBatch)
+      }
+
       setQuestions(questionsData.questions)
       setInterviewItems(interviewItemsData.items)
       setDisplaySession(sessionData.session)
     })
 
-    // 监听实时更新 - 改进的 SSE 连接
-    let eventSource: EventSource | null = null
-    let reconnectTimer: NodeJS.Timeout | null = null
-
-    const connectSSE = () => {
-      if (eventSource) {
-        eventSource.close()
-      }
-
-      console.log("[Admin] Connecting to SSE...")
-      eventSource = new EventSource("/api/events")
-
-      eventSource.onopen = () => {
-        console.log("[Admin] SSE connection opened")
-      }
-
-      eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        console.log("[Admin] Received event:", data.type, data)
-
-        if (data.type === "heartbeat") {
-          // 忽略心跳包
-          return
-        }
-
-        if (data.type === "initial") {
-          setCandidates(data.data.candidates)
-          setJudges(data.data.judges)
-          setCurrentCandidate(data.data.currentCandidate)
-          if (data.data.displaySession) {
-            setDisplaySession(data.data.displaySession)
-          }
-          if (data.data.interviewItems) {
-            setInterviewItems(data.data.interviewItems)
-          }
-        } else if (data.type === "score_updated") {
-          setCandidates((prev) => prev.map((c) => (c.id === data.data.candidate.id ? data.data.candidate : c)))
-        } else if (data.type === "candidate_changed") {
-          console.log("[Admin] SSE candidate_changed event:", data.data.name, data.data.id)
-          setCurrentCandidate(data.data)
-          setCandidates((prev) => prev.map((c) => (c.id === data.data.id ? data.data : c)))
-        } else if (data.type === "stage_changed") {
-          console.log("[Admin] Stage changed to:", data.data.stage)
-          setDisplaySession((prev: any) => (prev ? { ...prev, currentStage: data.data.stage } : null))
-        } else if (data.type === "question_changed") {
-          console.log("[Admin] Question changed:", data.data)
-          setDisplaySession((prev: any) => (prev ? { ...prev, currentQuestion: data.data } : null))
-        } else if (data.type === "interview_item_changed") {
-          console.log("[Admin] Interview item changed:", data.data)
-          setDisplaySession((prev: any) => (prev ? { ...prev, currentInterviewItem: data.data.item } : null))
-        } else if (data.type === "interview_items_changed") {
-          console.log("[Admin] Interview items changed:", data.data)
-          const sortedItems = data.data.items.sort((a: any, b: any) => a.order - b.order)
-          console.log("[Admin] Setting sorted interview items:", sortedItems)
-          setInterviewItems(sortedItems)
-        }
-      }
-
-      eventSource.onerror = (error) => {
-        console.error("[Admin] SSE error:", error)
-        eventSource?.close()
-
-        // 自动重连
-        if (!reconnectTimer) {
-          reconnectTimer = setTimeout(() => {
-            console.log("[Admin] Attempting to reconnect SSE...")
-            reconnectTimer = null
-            connectSSE()
-          }, 3000)
-        }
-      }
-    }
-
-    // 初始连接
-    connectSSE()
-
     return () => {
       clearInterval(timer)
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer)
-      }
-      if (eventSource) {
-        eventSource.close()
-      }
     }
   }, [])
+
+  // WebSocket事件处理
+  useEffect(() => {
+    if (isConnected) {
+      onScoringEvent((event: ScoringEvent) => {
+        console.log("[Admin] Received WebSocket event:", event.type, event.data)
+
+        switch (event.type) {
+          case "score_updated":
+            setCandidates((prev) => prev.map((c) => (c.id === event.data.candidate.id ? event.data.candidate : c)))
+            break
+
+          case "candidate_changed":
+            console.log("[Admin] WebSocket candidate_changed event:", event.data.name, event.data.id)
+            setCurrentCandidate(event.data)
+            setCandidates((prev) => prev.map((c) => (c.id === event.data.id ? event.data : c)))
+            break
+
+          case "stage_changed":
+            console.log("[Admin] Stage changed to:", event.data.stage)
+            // 使用完整的 displaySession 数据来确保状态同步
+            if (event.data.displaySession) {
+              setDisplaySession(event.data.displaySession)
+            } else {
+              // 向后兼容：如果只有 stage 数据
+              setDisplaySession((prev: any) => (prev ? { ...prev, currentStage: event.data.stage } : null))
+            }
+            break
+
+          case "question_changed":
+            console.log("[Admin] Question changed:", event.data)
+            setDisplaySession((prev: any) => (prev ? { ...prev, currentQuestion: event.data } : null))
+            break
+
+          case "interview_item_changed":
+            console.log("[Admin] Interview item changed:", event.data)
+            setDisplaySession((prev: any) => (prev ? { ...prev, currentInterviewItem: event.data.item } : null))
+            break
+
+          case "interview_items_changed":
+            console.log("[Admin] Interview items changed:", event.data)
+            const sortedItems = event.data.items.sort((a: any, b: any) => a.order - b.order)
+            console.log("[Admin] Setting sorted interview items:", sortedItems)
+            setInterviewItems(sortedItems)
+            break
+
+          case "judge_changed":
+            setJudges(prev => prev.map(j => j.id === event.data.id ? event.data : j))
+            break
+
+          case "dimension_changed":
+            setDimensions(event.data.dimensions)
+            break
+
+          case "score_item_changed":
+            setScoreItems(event.data.scoreItems)
+            break
+
+          default:
+            console.log("[Admin] Unhandled WebSocket event type:", event.type)
+        }
+      })
+    }
+  }, [isConnected, onScoringEvent])
 
   const setCurrentCandidateHandler = async (candidateId: string) => {
     try {
       console.log("[Admin] Setting current candidate to:", candidateId)
 
-      const response = await fetch("/api/admin/set-candidate", {
+      const response = await fetch("/api/admin/current-candidate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ candidateId }),
@@ -185,18 +188,7 @@ export default function AdminPage() {
         const result = await response.json()
         console.log("[Admin] Set candidate response:", result)
 
-        // 手动更新当前候选人状态，确保UI立即响应
-        const candidate = candidates.find(c => c.id === candidateId)
-        if (candidate) {
-          console.log("[Admin] Updating UI with candidate:", candidate.name)
-          setCurrentCandidate({ ...candidate, status: "interviewing" as const })
-          // 更新候选人列表中的状态：新候选人设为面试中，其他候选人重置为等待中
-          setCandidates(prev => prev.map(c =>
-            c.id === candidateId
-              ? { ...c, status: "interviewing" as const }
-              : { ...c, status: c.status === "interviewing" ? "waiting" as const : c.status }
-          ))
-        }
+        // API 内部已经会通过 WebSocket 广播事件，无需重复发送
       }
     } catch (error) {
       console.error("设置当前候选人失败:", error)
@@ -230,13 +222,20 @@ export default function AdminPage() {
       fetch("/api/admin/dimensions").then((res) => res.json()),
       fetch("/api/admin/score-items").then((res) => res.json()),
       fetch("/api/admin/batches").then((res) => res.json()),
-    ]).then(([scoreData, dimensionsData, scoreItemsData, batchesData]) => {
+      fetch("/api/admin/batches?enhanced=true").then((res) => res.json()),
+    ]).then(([scoreData, dimensionsData, scoreItemsData, batchesData, enhancedBatchesData]) => {
       setCandidates(scoreData.candidates)
       setJudges(scoreData.judges)
       setCurrentCandidate(scoreData.currentCandidate)
       setDimensions(dimensionsData.dimensions)
       setScoreItems(scoreItemsData.scoreItems)
       setBatches(batchesData.batches)
+
+      // 处理增强批次数据
+      if (enhancedBatchesData.success) {
+        setEnhancedBatches(enhancedBatchesData.batches)
+        setActiveBatch(enhancedBatchesData.activeBatch)
+      }
     })
   }
 
@@ -257,14 +256,14 @@ export default function AdminPage() {
       : 0
   const activeJudges = judges.filter((j) => j.isActive).length
 
-  const handleStageChange = async (stage: "opening" | "questioning" | "scoring") => {
+  const handleStageChange = async (stage: "opening" | "interviewing" | "scoring") => {
     try {
       // 设置加载状态
       setStageLoading(stage)
       setStageSuccess(null)
 
       console.log("Switching to stage:", stage)
-      const response = await fetch("/api/admin/display/stage", {
+      const response = await fetch("/api/admin/stage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage }),
@@ -272,6 +271,8 @@ export default function AdminPage() {
 
       if (response.ok) {
         console.log("Stage switched successfully to:", stage)
+
+        // API 内部已经会通过 WebSocket 广播事件，无需重复发送
 
         // 设置成功状态
         setStageLoading(null)
@@ -306,6 +307,16 @@ export default function AdminPage() {
 
       if (response.ok) {
         console.log("Question switched successfully to:", questionId)
+
+        // 通过WebSocket广播题目变更事件
+        const question = questions.find(q => q.id === questionId)
+        if (question) {
+          sendEvent({
+            type: 'question_changed',
+            data: { question },
+            timestamp: Date.now()
+          })
+        }
 
         // 设置成功状态
         setQuestionLoading(null)
@@ -396,17 +407,23 @@ export default function AdminPage() {
   const handleSaveInterviewItems = async (items: InterviewItem[]) => {
     try {
       console.log("[Admin] 保存面试项目:", items)
+      console.log("[Admin] 题目2的详细信息:", items.find(item => item.id === "2"))
 
+      console.log("[Admin] 开始发送API请求...")
       const response = await fetch("/api/admin/interview-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items }),
       })
 
+      console.log("[Admin] API响应状态:", response.status, response.statusText)
+
       if (response.ok) {
+        console.log("[Admin] API请求成功")
         // 立即更新本地状态，确保按order排序
         const sortedItems = items.sort((a, b) => a.order - b.order)
         console.log("[Admin] 立即更新本地状态:", sortedItems)
+        console.log("[Admin] 本地状态中题目2的信息:", sortedItems.find(item => item.id === "2"))
         setInterviewItems(sortedItems)
 
         // 同时刷新面试项目数据以确保同步
@@ -424,10 +441,13 @@ export default function AdminPage() {
 
         console.log("面试项目保存成功")
       } else {
-        console.error("保存面试项目失败")
+        const errorText = await response.text()
+        console.error("[Admin] API请求失败:", response.status, response.statusText, errorText)
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`)
       }
     } catch (error) {
-      console.error("保存面试项目时出错:", error)
+      console.error("[Admin] 保存面试项目失败:", error)
+      throw error
     }
   }
 
@@ -509,6 +529,26 @@ export default function AdminPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {/* 当前批次状态指示器 */}
+              {activeBatch && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium text-green-800">活跃批次</span>
+                  </div>
+                  <div className="text-sm text-green-700">
+                    {activeBatch.name}
+                  </div>
+                  <Badge className="bg-green-100 text-green-800 border-green-300">
+                    {activeBatch.runtime.metadata.totalCandidates} 位候选人
+                  </Badge>
+                </div>
+              )}
+
+              <Badge variant={isConnected ? "default" : "destructive"}>
+                <div className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                {isConnected ? 'WebSocket已连接' : 'WebSocket断开'}
+              </Badge>
               <Badge variant="outline" className="text-green-600 border-green-200">
                 <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
                 系统正常
@@ -699,41 +739,41 @@ export default function AdminPage() {
                           )}
                         </Button>
 
-                        {/* 答题环节 */}
+                        {/* 面试环节 */}
                         <Button
-                          onClick={() => handleStageChange("questioning")}
+                          onClick={() => handleStageChange("interviewing")}
                           variant="outline"
-                          disabled={stageLoading === "questioning"}
+                          disabled={stageLoading === "interviewing"}
                           className={`h-28 flex flex-col gap-2 transition-all duration-300 transform hover:scale-105 relative ${
-                            displaySession?.currentStage === "questioning"
+                            displaySession?.currentStage === "interviewing"
                               ? "bg-green-100 border-green-300 shadow-lg ring-2 ring-green-200"
                               : "bg-green-50 border-green-200 hover:bg-green-100"
                           } ${
-                            stageSuccess === "questioning"
+                            stageSuccess === "interviewing"
                               ? "bg-green-200 border-green-400 shadow-xl"
                               : ""
                           }`}
                         >
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold transition-all duration-300 ${
-                            stageLoading === "questioning"
+                            stageLoading === "interviewing"
                               ? "bg-green-400 animate-pulse"
-                              : stageSuccess === "questioning"
+                              : stageSuccess === "interviewing"
                               ? "bg-green-500 animate-bounce"
-                              : displaySession?.currentStage === "questioning"
+                              : displaySession?.currentStage === "interviewing"
                               ? "bg-green-600 shadow-lg"
                               : "bg-green-500"
                           }`}>
-                            {stageLoading === "questioning" ? (
+                            {stageLoading === "interviewing" ? (
                               <Loader2 className="h-5 w-5 animate-spin" />
-                            ) : stageSuccess === "questioning" ? (
+                            ) : stageSuccess === "interviewing" ? (
                               <CheckCircle className="h-5 w-5" />
                             ) : (
                               <MessageSquare className="h-5 w-5" />
                             )}
                           </div>
-                          <span className="font-medium">答题环节</span>
-                          <span className="text-xs text-gray-500">候选人回答问题</span>
-                          {displaySession?.currentStage === "questioning" && (
+                          <span className="font-medium">面试环节</span>
+                          <span className="text-xs text-gray-500">面试问答环节</span>
+                          {displaySession?.currentStage === "interviewing" && (
                             <div className="absolute top-2 right-2">
                               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                             </div>
@@ -784,11 +824,15 @@ export default function AdminPage() {
                     </div>
 
                     {/* 面试控制（仅在面试环节可用） */}
-                    <div className="bg-gray-50 rounded-lg p-6">
+                    <div className={`bg-gray-50 rounded-lg p-6 transition-all duration-300 ${
+                      displaySession?.currentStage !== "interviewing"
+                        ? "opacity-50 pointer-events-none"
+                        : ""
+                    }`}>
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
                           <h3 className="text-lg font-semibold">面试控制</h3>
-                          {displaySession?.currentStage !== "questioning" && (
+                          {displaySession?.currentStage !== "interviewing" && (
                             <Badge variant="outline" className="text-xs text-gray-500">
                               仅在面试环节可用
                             </Badge>
@@ -796,27 +840,29 @@ export default function AdminPage() {
                         </div>
                         <Button
                           onClick={() => setShowItemManager(true)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg shadow-lg"
+                          disabled={displaySession?.currentStage !== "interviewing"}
+                          className={`font-medium px-4 py-2 rounded-lg shadow-lg transition-all duration-300 ${
+                            displaySession?.currentStage !== "interviewing"
+                              ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                              : "bg-blue-600 hover:bg-blue-700 text-white"
+                          }`}
                         >
                           <Edit className="w-4 h-4 mr-2" />
                           编辑面试项目
                         </Button>
                       </div>
                       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-                        {(() => {
-                          const filteredAndSorted = interviewItems
-                            .filter((item) => item.isActive)
-                            .sort((a, b) => a.order - b.order)
-                          console.log("[Admin] 渲染面试控制项目:", filteredAndSorted)
-                          return filteredAndSorted
-                        })().map((item, index) => (
+                        {interviewItems
+                          .filter((item) => item.isActive)
+                          .sort((a, b) => a.order - b.order)
+                          .map((item, index) => (
                             <Button
                               key={item.id}
                               onClick={() => handleInterviewItemChange(item.id)}
                               variant="outline"
-                              disabled={questionLoading === item.id || (item.type === 'question' && displaySession?.currentStage !== "questioning")}
+                              disabled={questionLoading === item.id || displaySession?.currentStage !== "interviewing"}
                               className={`min-h-[120px] h-auto flex flex-col gap-2 text-left justify-start p-4 transition-all duration-300 transform hover:scale-105 relative ${
-                                (item.type === 'question' && displaySession?.currentStage !== "questioning")
+                                displaySession?.currentStage !== "interviewing"
                                   ? "bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed"
                                   : displaySession?.currentInterviewItem?.id === item.id
                                   ? "bg-blue-100 border-blue-300 shadow-lg ring-2 ring-blue-200"
@@ -828,8 +874,8 @@ export default function AdminPage() {
                               }`}
                             >
                               <div className="flex items-center gap-2 mb-2 w-full">
-                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 flex-shrink-0 ${
-                                  (item.type === 'question' && displaySession?.currentStage !== "questioning")
+                                <div className={`w-8 h-8 rounded-lg flex flex-col items-center justify-center text-xs font-bold transition-all duration-300 flex-shrink-0 ${
+                                  displaySession?.currentStage !== "interviewing"
                                     ? "bg-gray-200 text-gray-400"
                                     : questionLoading === item.id
                                     ? "bg-blue-400 text-white animate-pulse"
@@ -838,32 +884,60 @@ export default function AdminPage() {
                                     : displaySession?.currentInterviewItem?.id === item.id
                                     ? "bg-blue-600 text-white shadow-lg"
                                     : item.type === 'interview_stage'
-                                    ? "bg-purple-300 text-purple-700"
-                                    : "bg-gray-300 text-gray-600"
+                                    ? "bg-purple-100 text-purple-700 border-2 border-purple-200"
+                                    : "bg-blue-100 text-blue-700 border-2 border-blue-200"
                                 }`}>
                                   {questionLoading === item.id ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                   ) : questionSuccess === item.id ? (
-                                    <CheckCircle className="h-3 w-3" />
-                                  ) : item.type === 'interview_stage' ? (
-                                    <Users className="h-3 w-3" />
+                                    <CheckCircle className="h-4 w-4" />
                                   ) : (
-                                    index + 1
+                                    <>
+                                      <div className="text-[8px] leading-none">
+                                        {item.type === 'interview_stage' ? '环' : '题'}
+                                      </div>
+                                      <div className="text-xs font-bold leading-none">
+                                        {(() => {
+                                          if (item.type === 'interview_stage') {
+                                            const stageItems = interviewItems.filter(i => i.type === 'interview_stage' && i.isActive).sort((a, b) => a.order - b.order)
+                                            return stageItems.findIndex(i => i.id === item.id) + 1
+                                          } else {
+                                            const questionItems = interviewItems.filter(i => i.type === 'question' && i.isActive).sort((a, b) => a.order - b.order)
+                                            return questionItems.findIndex(i => i.id === item.id) + 1
+                                          }
+                                        })()}
+                                      </div>
+                                    </>
                                   )}
                                 </div>
-                                <span className="font-medium text-sm truncate flex-1">
-                                  {item.type === 'interview_stage' ? item.title : `题目 ${index + 1}`}
-                                </span>
-                                <Badge
-                                  variant="outline"
-                                  className={`text-xs ml-auto flex-shrink-0 ${
-                                    item.type === 'interview_stage'
-                                      ? 'border-purple-200 text-purple-600 bg-purple-50'
-                                      : 'border-blue-200 text-blue-600 bg-blue-50'
-                                  }`}
-                                >
-                                  {item.timeLimit ? `${Math.floor(item.timeLimit / 60)}分钟` : "无限制"}
-                                </Badge>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1 mb-1">
+                                    <span className="font-medium text-sm truncate">
+                                      {item.title}
+                                    </span>
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-xs ${
+                                        item.type === 'interview_stage'
+                                          ? 'border-purple-200 text-purple-600 bg-purple-50'
+                                          : 'border-blue-200 text-blue-600 bg-blue-50'
+                                      }`}
+                                    >
+                                      {item.type === 'interview_stage' ? '环节' : '题目'}
+                                    </Badge>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs"
+                                    >
+                                      {item.timeLimit ? `${Math.floor(item.timeLimit / 60)}分钟` : "无限制"}
+                                    </Badge>
+                                    <span className="text-xs text-gray-500">
+                                      顺序: {item.order + 1}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
                               <div className="flex-1 space-y-1">
                                 <div className="text-sm text-gray-600 leading-tight" style={{
@@ -917,7 +991,7 @@ export default function AdminPage() {
                       )}
 
                       {/* 倒计时控制 */}
-                      {displaySession?.currentStage === "questioning" && (
+                      {displaySession?.currentStage === "interviewing" && (
                         <div className="mt-6 pt-6 border-t border-gray-200">
                           <TimerControl
                             timerState={displaySession?.timerState}
@@ -955,7 +1029,7 @@ export default function AdminPage() {
                             <div className="text-sm text-gray-500 mb-1">当前环节</div>
                             <div className="font-medium">
                               {displaySession?.currentStage === "opening" && "开场环节"}
-                              {displaySession?.currentStage === "questioning" && "答题环节"}
+                              {displaySession?.currentStage === "interviewing" && "面试环节"}
                               {displaySession?.currentStage === "scoring" && "评分环节"}
                               {!displaySession?.currentStage && "未开始"}
                             </div>
@@ -1000,7 +1074,7 @@ export default function AdminPage() {
                           <span className="font-medium">
                             {stageSuccess && `已切换到${
                               stageSuccess === "opening" ? "开场环节" :
-                              stageSuccess === "questioning" ? "答题环节" :
+                              stageSuccess === "interviewing" ? "面试环节" :
                               "评分环节"
                             }`}
                             {questionSuccess && "题目切换成功"}
@@ -1098,16 +1172,25 @@ export default function AdminPage() {
                 </CardHeader>
                 <CardContent>
                   <Tabs defaultValue="dimensions" className="w-full">
-                    <TabsList className="grid w-full grid-cols-3">
+                    <TabsList className="grid w-full grid-cols-4">
                       <TabsTrigger value="dimensions">面试维度</TabsTrigger>
                       <TabsTrigger value="items">成绩项目</TabsTrigger>
+                      <TabsTrigger value="scores">成绩管理</TabsTrigger>
                       <TabsTrigger value="system">系统参数</TabsTrigger>
                     </TabsList>
                     <TabsContent value="dimensions" className="mt-6">
                       <InterviewDimensions dimensions={dimensions} onRefresh={refreshData} />
                     </TabsContent>
                     <TabsContent value="items" className="mt-6">
-                      <ScoreItems scoreItems={scoreItems} candidates={candidates} onRefresh={refreshData} />
+                      <ScoreItems scoreItems={scoreItems} onRefresh={refreshData} />
+                    </TabsContent>
+                    <TabsContent value="scores" className="mt-6">
+                      <CandidateScoreManagement
+                        scoreItems={scoreItems}
+                        candidates={candidates}
+                        dimensions={dimensions}
+                        onRefresh={refreshData}
+                      />
                     </TabsContent>
                     <TabsContent value="system" className="mt-6">
                       <div className="space-y-6">
@@ -1322,10 +1405,13 @@ export default function AdminPage() {
           {activeTab === "batches" && (
             <BatchManagement
               batches={batches}
+              enhancedBatches={enhancedBatches}
+              activeBatch={activeBatch}
               judges={judges}
               dimensions={dimensions}
               scoreItems={scoreItems}
               onRefresh={refreshData}
+              enhanced={true}
             />
           )}
         </div>

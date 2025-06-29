@@ -143,9 +143,19 @@ experimental: {
 
 **关键修改模式：**
 ```typescript
-// 替换模式
-// 旧: const eventSource = new EventSource('/api/events')
-// 新: const { subscribe, isConnected } = useWebSocket()
+// 替换模式 - 管理页面 (admin/page.tsx 第87-172行)
+// 旧: let eventSource: EventSource | null = null
+//     eventSource = new EventSource("/api/events")
+//     eventSource.onmessage = (event) => { ... }
+
+// 新: const { isConnected, subscribe } = useWebSocket({ clientType: 'admin' })
+//     useEffect(() => {
+//       const unsubscribers = [
+//         subscribe('candidate_changed', (data) => { ... }),
+//         subscribe('stage_changed', (data) => { ... })
+//       ]
+//       return () => unsubscribers.forEach(fn => fn())
+//     }, [isConnected, subscribe])
 ```
 
 #### 2.4 功能验证测试（1小时）

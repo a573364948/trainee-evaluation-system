@@ -200,9 +200,9 @@ type WebSocketEvents = {
 
 #### 3. 前端页面SSE集成
 **需要修改的页面：**
-- `app/admin/page.tsx` - 管理页面
-- `app/display/page.tsx` - 大屏显示页面
-- `app/score/page.tsx` - 评分页面
+- `app/admin/page.tsx` - 管理页面 (第87-172行SSE代码)
+- `app/display/page.tsx` - 大屏显示页面 (第57-291行SSE代码)
+- `app/judge/page.tsx` - 评委页面 (第98-172行SSE代码) ⚠️ 修正路径
 
 **修改内容：**
 - 替换 `EventSource` 为 `WebSocket`
